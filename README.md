@@ -26,14 +26,13 @@ registry, CLI, and Gradio UI.
 - **Gradio web UI** — project name, seed input, live metadata panel, model dropdown with hot-reload, device field.
 - **Built-in audio editor** — post-processing tab with normalize, trim, fade, time stretch, pitch shift, EQ, and reverb; non-destructive exports with full effects sidecar.
 - **MCP server** — expose all generation and editing capabilities to Claude and other MCP clients over stdio; models are cached between calls.
-- **Python 3.12 / 3.13** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout. (ACE-Step requires Python 3.12; Stable Audio and MLX work on both.)
+- **Python 3.12 / 3.13** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout.
 
 ---
 
 ## Requirements
 
-- **Python 3.12** — required for ACE-Step music generation
-- **Python 3.12 or 3.13** — sufficient for Stable Audio and MLX models only
+- **Python 3.12 or 3.13** — recommended
 - Python 3.14+ is too new for several ML dependencies and will cause build failures
 - PyTorch 2.0 or later
 
@@ -41,8 +40,8 @@ registry, CLI, and Gradio UI.
 
 ## Install
 
-> **Python 3.12 is recommended** — required for ACE-Step. Python 3.13 works for Stable Audio / MLX only.
-> Install via `brew install python@3.12` (macOS) or from [python.org](https://python.org) (Windows).
+> **Python 3.12 or 3.13 is required.** Check with `python3 --version`.
+> Install via `brew install python@3.13` (macOS) or from [python.org](https://python.org) (Windows).
 
 ### macOS / Linux
 
@@ -73,7 +72,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 
 pip install .                      # core install
 pip install mlx-audiogen           # Apple Silicon only: MLX acceleration
-pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation (Python 3.12 only)
+pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
 ```
 
 ### Verify your setup

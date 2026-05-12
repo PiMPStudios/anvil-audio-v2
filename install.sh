@@ -62,32 +62,27 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
 fi
 
 # ── ACE-Step (optional music generation) ─────────────────────────────────────
-if [[ "$PY_MINOR" -ge 13 ]]; then
-    echo "NOTE: ACE-Step 1.5 requires Python 3.12 (its package declares requires-python <3.13)."
-    echo "      Skipping ACE-Step prompt. Re-run with PYTHON=python3.12 to enable it."
-else
-    read -r -p "Install ACE-Step for music generation? [y/N] " INSTALL_AS
-    if [[ "$INSTALL_AS" =~ ^[Yy]$ ]]; then
+read -r -p "Install ACE-Step for music generation? [y/N] " INSTALL_AS
+if [[ "$INSTALL_AS" =~ ^[Yy]$ ]]; then
 
-        if [[ "$OS" == "Linux" ]]; then
-            echo "Installing nano-vllm (required on Linux)..."
-            $PIP install \
-                "git+https://github.com/ace-step/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm" \
-                --quiet
-            if [[ $? -ne 0 ]]; then
-                echo "WARNING: nano-vllm install failed — ACE-Step may not work correctly."
-            fi
-        fi
-
-        echo "Installing ACE-Step..."
+    if [[ "$OS" == "Linux" ]]; then
+        echo "Installing nano-vllm (required on Linux)..."
         $PIP install \
-            "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git" \
-            --quiet
-        if [[ $? -eq 0 ]]; then
-            echo "ACE-Step installed."
-        else
-            echo "WARNING: ACE-Step install failed. Check errors above."
+            "git+https://github.com/ace-step/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm" \
+            --ignore-requires-python --quiet
+        if [[ $? -ne 0 ]]; then
+            echo "WARNING: nano-vllm install failed — ACE-Step may not work correctly."
         fi
+    fi
+
+    echo "Installing ACE-Step..."
+    $PIP install \
+        "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git" \
+        --ignore-requires-python --quiet
+    if [[ $? -eq 0 ]]; then
+        echo "ACE-Step installed."
+    else
+        echo "WARNING: ACE-Step install failed. Check errors above."
     fi
 fi
 

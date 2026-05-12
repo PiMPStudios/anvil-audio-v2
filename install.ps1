@@ -53,14 +53,16 @@ if (-not $SkipAceStep) {
     if ($Answer -match "^[Yy]$") {
         Write-Host "Installing nano-vllm (required on Windows)..."
         & $Pip install `
-            "git+https://github.com/ace-step/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm"
+            "git+https://github.com/ace-step/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm" `
+            --ignore-requires-python
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "nano-vllm install failed — ACE-Step may not work correctly."
         }
 
         Write-Host "Installing ACE-Step..."
         & $Pip install `
-            "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git"
+            "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git" `
+            --ignore-requires-python
         if ($LASTEXITCODE -eq 0) {
             Write-Host "ACE-Step installed." -ForegroundColor Green
         } else {
