@@ -63,7 +63,7 @@ fi
 
 # ── ACE-Step (optional music generation) ─────────────────────────────────────
 if [[ "$PY_MINOR" -ge 13 ]]; then
-    echo "NOTE: ACE-Step requires Python 3.12 (spacy 3.8.x does not support 3.13+)."
+    echo "NOTE: ACE-Step 1.5 requires Python 3.12 (its package declares requires-python <3.13)."
     echo "      Skipping ACE-Step prompt. Re-run with PYTHON=python3.12 to enable it."
 else
     read -r -p "Install ACE-Step for music generation? [y/N] " INSTALL_AS
