@@ -6,6 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "anvil-audio"
 version = "1.0.0"
 requires-python = ">=3.12"
+keywords = [
+    "ace-step",
+    "ai-audio",
+    "apple-silicon",
+    "audio-generation",
+    "diffusion",
+    "gradio",
+    "mlx",
+    "music-generation",
+    "pytorch",
+    "stable-audio",
+]
 dependencies = [
     "alias-free-torch>=0.0.6",
     "auraloss>=0.4.0",

@@ -117,7 +117,7 @@ As same as training or other scripts, you can execute the script with Singularit
 
 ```bash
 CONTAINER_PATH="/path/to/sif/anvil-audio.sif"
-ROOT_DIR="/path/to/anvil-audio/"
+ROOT_DIR="/path/to/anvil-audio-v2/"
 OUTPUT_DIR="/path/to/output_dir/"
 
 COND_YAML_PATH="example/generation/generate_conditions.yaml"
@@ -148,7 +148,7 @@ You can run the Gradio script using Singularity container as follows.
 
 ```bash
 CONTAINER_PATH="/path/to/sif/anvil-audio.sif"
-ROOT_DIR="/path/to/anvil-audio/"
+ROOT_DIR="/path/to/anvil-audio-v2/"
 TMP_DIR="/path/to/temporary_dir/" # e.g. 'tmp/'
 
 HF_TOKEN="hf_abcdefgh123ijk..." # set your token

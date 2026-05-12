@@ -46,8 +46,8 @@ registry, CLI, and Gradio UI.
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/PiMPStudios/anvil-audio.git
-cd anvil-audio
+git clone https://github.com/PiMPStudios/anvil-audio-v2.git
+cd anvil-audio-v2
 python3.13 -m venv .venv
 source .venv/bin/activate
 bash install.sh
@@ -58,8 +58,8 @@ The script detects your platform, installs the right PyTorch build, enables MLX 
 ### Windows
 
 ```powershell
-git clone https://github.com/PiMPStudios/anvil-audio.git
-cd anvil-audio
+git clone https://github.com/PiMPStudios/anvil-audio-v2.git
+cd anvil-audio-v2
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
@@ -428,7 +428,7 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "anvil-audio": {
-      "command": "/path/to/anvil-audio/.venv/bin/python",
+      "command": "/path/to/anvil-audio-v2/.venv/bin/python",
       "args": ["-m", "anvil_audio.mcp_server"]
     }
   }
@@ -436,7 +436,7 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`
 ```
 
 
-Replace `/path/to/anvil-audio` with the absolute path to your clone.
+Replace `/path/to/anvil-audio-v2` with the absolute path to your clone.
 
 ### Claude Code config
 
@@ -446,7 +446,7 @@ Add to `~/.claude.json` under `mcpServers`:
 {
   "mcpServers": {
     "anvil-audio": {
-      "command": "/path/to/anvil-audio/.venv/bin/python",
+      "command": "/path/to/anvil-audio-v2/.venv/bin/python",
       "args": ["-m", "anvil_audio.mcp_server"],
       "type": "stdio"
     }
@@ -624,84 +624,6 @@ python3 unwrap_model.py \
     --model-config /path/to/model/config \
     --ckpt-path /path/to/wrapped/ckpt.ckpt \
     --name /path/to/output/unwrapped_name
-```
-
----
-
-## Training Stable Audio 2.0
-
-### Prerequisites
-
-**1. CLAP encoder checkpoint**
-
-Download `music_audioset_epoch_15_esc_90.14.pt` from the
-[LAION CLAP repository](https://github.com/LAION-AI/CLAP?tab=readme-ov-file#pretrained-models)
-and set `clap_ckpt_path` in `stable_audio_2_0.json`:
-
-```json
-"config": {
-    "clap_ckpt_path": "ckpt/clap/music_audioset_epoch_15_esc_90.14.pt"
-}
-```
-
-**2. Audio + metadata**
-
-Each audio file needs a paired JSON sidecar with at minimum a `prompt` field:
-
-```
-dataset/
-├── music_1.wav
-├── music_1.json   ← {"prompt": "upbeat electronic track with positive vibes"}
-├── music_2.wav
-├── music_2.json
-└── ...
-```
-
-### Stage 1 — VAE-GAN
-
-```bash
-MODEL_CONFIG="anvil_audio/configs/model_configs/autoencoders/stable_audio_2_0_vae.json"
-DATASET_CONFIG="anvil_audio/configs/dataset_configs/local_training_example.json"
-
-python3 train.py \
-    --dataset-config ${DATASET_CONFIG} \
-    --model-config ${MODEL_CONFIG} \
-    --name "vae_training" \
-    --num-gpus 8 \
-    --batch-size 10 \
-    --num-workers 8 \
-    --save-dir ./output
-```
-
-After training, unwrap the checkpoint before Stage 2.
-
-### Stage 2 — Diffusion Transformer (DiT)
-
-```bash
-MODEL_CONFIG="anvil_audio/configs/model_configs/txt2audio/stable_audio_2_0.json"
-PRETRANSFORM_CKPT="/path/to/unwrapped_vae.ckpt"
-
-python3 train.py \
-    --dataset-config ${DATASET_CONFIG} \
-    --model-config ${MODEL_CONFIG} \
-    --pretransform-ckpt-path ${PRETRANSFORM_CKPT} \
-    --name "dit_training" \
-    --num-gpus 8 \
-    --batch-size 10 \
-    --save-dir ./output
-```
-
-### Reconstruction test
-
-```bash
-python3 reconstruct_audios.py \
-    --model-config ${MODEL_CONFIG} \
-    --ckpt-path /path/to/unwrapped_vae.ckpt \
-    --audio-dir /path/to/original_audio/ \
-    --output-dir /path/to/reconstructed/ \
-    --frame-duration 1.0 \
-    --overlap-rate 0.01 \
-    --batch-size 50
 ```
 
 ---
