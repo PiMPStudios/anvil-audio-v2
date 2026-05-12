@@ -18,11 +18,11 @@ registry, CLI, and Gradio UI.
 
 - **Pluggable pipeline architecture** — `BasePipeline`, `BaseGenerator`, `BaseCompressor`, `BaseConditioner` ABCs; swap any component without touching the rest of your workflow.
 - **Named model registry** — `anvil generate --model stable-audio-open-1.0 --prompt "..."` loads the right pipeline automatically; add your own entries in `~/.anvil-audio/registry.yaml`.
-- **ACE-Step support** — optional integration with [ACE-Step v1.5](https://github.com/ace-step/ACE-Step-1.5) for full-song music generation with lyrics and style tags. Installed automatically by `install.sh` — no manual repo clone required.
+- **ACE-Step support** — optional integration with [ACE-Step v1.5](https://github.com/ace-step/ACE-Step-1.5) for full-song music generation with lyrics and style tags. Optionally installed by `install.sh` — no manual repo clone required.
 - **MLX acceleration** — Apple Silicon users can install `mlx-audiogen` to get native Metal GPU inference for Stable Audio models (~2x faster than PyTorch MPS); weights are auto-converted and cached on first use.
 - **Output management** — collision-free timestamped filenames, JSON metadata sidecars with `generation_duration_seconds`, batch manifests, and project-scoped folders under `~/anvil-audio-outputs/`.
 - **MPS / CUDA / CPU auto-detection** — runs on Apple Silicon, NVIDIA GPUs, or CPU with no flags needed.
-- **`anvil generate` CLI** — multi-GPU via Accelerate, wav/flac/mp3 output, batch YAML conditions, per-run seed control; `anvil --list-models` works at the top level.
+- **`anvil generate` CLI** — multi-GPU via Accelerate, wav/flac/mp3/ogg output, batch YAML conditions, per-run seed control; `anvil --list-models` works at the top level.
 - **Gradio web UI** — project name, seed input, live metadata panel, model dropdown with hot-reload, device field.
 - **Built-in audio editor** — post-processing tab with normalize, trim, fade, time stretch, pitch shift, EQ, and reverb; non-destructive exports with full effects sidecar.
 - **MCP server** — expose all generation and editing capabilities to Claude and other MCP clients over stdio; models are cached between calls.
@@ -53,7 +53,7 @@ source .venv/bin/activate
 bash install.sh
 ```
 
-The script detects your platform, installs the right PyTorch build, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step. No separate repo clones required.
+The script detects your platform, installs the right PyTorch build, adds `pytest` for local verification, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step. No separate repo clones required.
 
 ### Windows
 
@@ -74,15 +74,17 @@ source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 pip install .                      # core install
 pip install mlx-audiogen           # Apple Silicon only: MLX acceleration
 pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
+pip install pytest                 # optional: run the local test suite
 ```
 
 ### Verify your setup
 
 ```bash
 anvil setup
+.venv/bin/python -m pytest
 ```
 
-This prints your platform, which optional packages are active, and what models are registered.
+`anvil setup` prints your platform, which optional packages are active, and what models are registered. The `pytest` command runs the local smoke tests.
 
 ---
 
@@ -92,8 +94,8 @@ The fastest path to generating audio:
 
 ```bash
 # 1. Clone and install (see Install above)
-# 2. Add a model to your registry (see User Registry below)
-# 3. Launch the Gradio UI — loads your first registered model automatically
+# 2. Choose a built-in model, or add your own in ~/.anvil-audio/registry.yaml
+# 3. Launch the Gradio UI — loads your selected or first registered model
 python run_gradio.py
 ```
 
@@ -266,6 +268,30 @@ Then register the XL model in your user registry:
     # offload_to_cpu: true
     # offload_dit_to_cpu: true
     # quantization: int8_weight_only
+```
+
+For XL SFT, use the SFT checkpoint name and the direct SFT defaults:
+
+```yaml
+- name: acestep-v1.5-xl-sft
+  pipeline_type: acestep
+  model_config_path: acestep-v15-xl-sft
+  max_duration: 600
+  default_params:
+    steps: 50
+    cfg_scale: 7.5
+    audio_duration: 60
+    sampler_type: ode
+    shift: 3.0
+    thinking: false
+    use_cot_metas: false
+    use_cot_caption: false
+    use_cot_language: false
+    dcw_enabled: false
+    velocity_norm_threshold: 0.0
+    velocity_ema_factor: 0.0
+    sigma_min: 0.0
+    sigma_max: 0.0
 ```
 
 ### CLI
@@ -627,7 +653,7 @@ load and prints the explicit install command.
 | `--seconds-total` | `30.0` | Duration (seconds) |
 | `--negative-prompt` | blank | Text describing sounds or qualities to avoid |
 | `--output-dir` | `./output` | Output directory |
-| `--format` | `wav` | `wav`, `flac`, or `mp3` |
+| `--format` | `wav` | `wav`, `flac`, `mp3`, or `ogg` |
 | `--clip-length` | off | Clip to `seconds_total` |
 | `--sample-steps` | pipeline default | Diffusion / inference steps |
 | `--cfg-scale` | pipeline default | CFG guidance scale |
