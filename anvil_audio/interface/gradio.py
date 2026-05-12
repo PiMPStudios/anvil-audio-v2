@@ -173,6 +173,7 @@ def load_acestep_model(
         project_root=entry.acestep_project_root,
         config_path=entry.model_config_path or "acestep-v15-turbo",
         device=acestep_device,
+        lm_model_path=entry.lm_model_path,
         default_params=entry.resolved_params(),
     )
     _model_name = entry.name
@@ -654,6 +655,8 @@ def generate_acestep(
         sigma_max=0.0,
         duration_seconds=audio_int16.shape[-1] / sample_rate,
         timestamp=ts,
+        seconds_start=0.0,
+        seconds_total=float(seconds_total),
         generation_duration_seconds=_gen_duration,
         extra={"lyrics": lyrics},
     )

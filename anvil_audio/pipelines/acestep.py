@@ -18,16 +18,16 @@ Anvil conditioning key  →  ACE-Step parameter
 ``cfg_scale``           →  ``guidance_scale``
 ``scheduler_type``      →  ``infer_method`` (``"ode"`` or ``"sde"``)
 
-LM lyric planner
+LM thinking path
 ----------------
 When ``lm_model_path`` is provided (and the ``LLMHandler`` import succeeds),
-the adapter initialises ACE-Step's 5 Hz LM lyric-planner alongside the DiT.
-For any generation request that contains non-empty, non-instrumental lyrics the
-planner runs first (``infer_type="llm_dit"``) and the resulting ``audio_codes``
-are forwarded to ``generate_music`` as ``audio_code_string``.  This matches the
-full quality path used by the standalone ACE-Step Gradio UI.
+the adapter initialises ACE-Step's 5 Hz LM alongside the DiT.  Generation is
+then delegated to ACE-Step's upstream ``generate_music`` orchestration, so
+``thinking=True`` can generate semantic audio-code hints and metadata.  The
+built-in SFT entry keeps thinking disabled by default to match AnvilApp's
+known-good direct DiT conditioning path.
 
-If the LM planner is unavailable (``lm_model_path=None``, import error, or
+If the LM is unavailable (``lm_model_path=None``, import error, or
 initialisation failure) the adapter falls back gracefully to DiT-only
 generation and logs a warning.
 
@@ -63,15 +63,19 @@ from torch import Tensor
 from anvil_audio.core.interfaces import BasePipeline
 from anvil_audio.utils.stdio_guard import stdout_to_stderr
 
-# Lyrics values that indicate instrumental generation — LM planning is skipped.
-_INSTRUMENTAL_MARKERS = {"", "[instrumental]"}
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a bool-ish environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 class ACEStepPipeline(BasePipeline):
     """``BasePipeline`` adapter for ACE-Step v1.5.
 
-    Wraps ``AceStepHandler`` (DiT/VAE) and optionally ``LLMHandler`` (5 Hz LM
-    lyric planner) so ACE-Step integrates with Anvil's registry, CLI batch
+    Wraps ``AceStepHandler`` (DiT/VAE) and optionally ``LLMHandler`` (5 Hz LM)
+    so ACE-Step integrates with Anvil's registry, CLI batch
     generation, ``OutputManager``, and Gradio UI without copying any of
     ACE-Step's model weights or inference logic.
 
@@ -89,16 +93,15 @@ class ACEStepPipeline(BasePipeline):
                          ``"auto"`` lets ACE-Step pick the best available.
         offload_to_cpu:  Enable sequential CPU offloading to lower peak VRAM
                          usage at the cost of slower generation.
-        lm_model_path:   Path to the 5 Hz LM lyric-planner checkpoint, either
+        lm_model_path:   Path to the 5 Hz LM checkpoint, either
                          relative to ``<project_root>/checkpoints/`` (e.g.
                          ``"acestep-5Hz-lm-1.7B"``) or an absolute path.
-                         ``None`` disables LM planning; generation falls back
-                         to DiT-only with raw lyric text.
+                         ``None`` disables LM thinking/code hints.
         default_params:  Generation parameter overrides applied when callers
                          omit individual kwargs.  Recognised keys:
                          ``steps``, ``cfg_scale``, ``scheduler_type``,
-                         ``sigma_min``, ``sigma_max`` (last two stored as 0.0
-                         so ``GenerationMetadata`` serialises cleanly).
+                         ``shift``, ``thinking``, ``dcw_enabled``,
+                         ``sigma_min``, and ``sigma_max``.
     """
 
     #: ACE-Step v1.5 VAE outputs 48 kHz stereo audio.
@@ -112,15 +115,18 @@ class ACEStepPipeline(BasePipeline):
         offload_to_cpu: bool = False,
         lm_model_path: str | None = None,
         default_params: dict[str, Any] | None = None,
+        use_mlx_dit: bool | None = None,
     ) -> None:
         # Inject project root into sys.path only when explicitly provided.
-        # When None, acestep must be importable already (pip-installed).
+        # When None, use Anvil's cache-backed project root for checkpoints while
+        # importing ACE-Step from the installed package.
         if project_root is not None:
             resolved_root = str(Path(project_root).resolve())
-            if resolved_root not in sys.path:
+            is_source_checkout = (Path(resolved_root) / "acestep").is_dir()
+            if is_source_checkout and resolved_root not in sys.path:
                 sys.path.insert(0, resolved_root)
         else:
-            resolved_root = None
+            resolved_root = str(Path.home() / ".cache" / "anvil-audio" / "acestep")
 
         try:
             from acestep.handler import AceStepHandler  # type: ignore[import]
@@ -147,14 +153,17 @@ class ACEStepPipeline(BasePipeline):
             "sigma_min": 0.0,
             "sigma_max": 0.0,
         }
+        if use_mlx_dit is None and "use_mlx_dit" in self.default_params:
+            use_mlx_dit = bool(self.default_params["use_mlx_dit"])
+        if use_mlx_dit is None:
+            use_mlx_dit = _env_bool("ANVIL_ACESTEP_USE_MLX_DIT", sys.platform == "darwin")
+        self._use_mlx_dit = bool(use_mlx_dit)
 
-        # When pip-installed (no project_root) and ACESTEP_PROJECT_ROOT is not
-        # set, default to ~/.cache/anvil-audio/acestep so checkpoints land in a
-        # proper cache directory instead of os.getcwd() (the repo root).
-        if resolved_root is None and "ACESTEP_PROJECT_ROOT" not in os.environ:
-            default_cache = str(Path.home() / ".cache" / "anvil-audio" / "acestep")
-            os.makedirs(default_cache, exist_ok=True)
-            os.environ["ACESTEP_PROJECT_ROOT"] = default_cache
+        # Keep ACE-Step internals pointed at the same checkpoint root that Anvil
+        # is about to pass into initialize_service.  This avoids stale shell env
+        # values sending downloads/logs to an old checkout.
+        os.makedirs(resolved_root, exist_ok=True)
+        os.environ["ACESTEP_PROJECT_ROOT"] = resolved_root
 
         # On macOS, set ACESTEP_LM_BACKEND=mlx unless the user has already
         # set it.
@@ -166,20 +175,21 @@ class ACEStepPipeline(BasePipeline):
             f"->->-> Initialising ACE-Step  "
             f"config={config_path!r}  device={device!r}  "
             f"offload={offload_to_cpu}"
-            + ("  mlx=DiT+VAE+LM" if on_apple_silicon else ""),
+            + ("  mlx=DiT+VAE+LM" if on_apple_silicon and self._use_mlx_dit else ""),
             file=sys.stderr,
         )
         # initialize_service loads model weights and may print to stdout;
         # redirect so MCP stdio is not corrupted.
-        # use_mlx_dit=True (default) activates native MLX acceleration for the
-        # DiT and VAE when device resolves to "mps" or "cpu" on Apple Silicon.
+        # use_mlx_dit activates native MLX acceleration for the DiT and VAE
+        # when device resolves to "mps" or "cpu" on Apple Silicon.  It remains
+        # overrideable for backend-parity debugging.
         with stdout_to_stderr():
             status, success = self._handler.initialize_service(
                 project_root=self._project_root,
                 config_path=config_path,
                 device=device,
                 offload_to_cpu=offload_to_cpu,
-                use_mlx_dit=True,
+                use_mlx_dit=self._use_mlx_dit,
             )
         if not success:
             raise RuntimeError(
@@ -192,7 +202,7 @@ class ACEStepPipeline(BasePipeline):
         print(f"->->-> ACE-Step ready  {status}", file=sys.stderr)
 
         # ------------------------------------------------------------------
-        # LM lyric planner (optional)
+        # 5 Hz LM thinking/code-hint path (optional)
         # ------------------------------------------------------------------
         self._lm_handler: Any = None
         self._lm_available: bool = False
@@ -207,7 +217,7 @@ class ACEStepPipeline(BasePipeline):
         device: str,
         offload_to_cpu: bool,
     ) -> None:
-        """Attempt to initialise the 5 Hz LM lyric planner.
+        """Attempt to initialise the 5 Hz LM.
 
         Failures are non-fatal: a warning is printed and generation falls back
         to DiT-only mode.
@@ -222,7 +232,7 @@ class ACEStepPipeline(BasePipeline):
             from acestep.llm_inference import LLMHandler  # type: ignore[import]
         except ImportError as exc:
             print(
-                f"[ACEStep] WARNING: LLMHandler import failed — LM planning disabled.\n"
+                f"[ACEStep] WARNING: LLMHandler import failed — LM thinking disabled.\n"
                 f"  {exc}",
                 file=sys.stderr,
             )
@@ -239,7 +249,7 @@ class ACEStepPipeline(BasePipeline):
         lm_backend = os.environ.get("ACESTEP_LM_BACKEND", "vllm")
 
         print(
-            f"->->-> Initialising ACE-Step LM planner  "
+            f"->->-> Initialising ACE-Step LM  "
             f"model={os.path.basename(resolved_lm)!r}  backend={lm_backend!r}",
             file=sys.stderr,
         )
@@ -256,7 +266,7 @@ class ACEStepPipeline(BasePipeline):
                 )
         except Exception as exc:
             print(
-                f"[ACEStep] WARNING: LM planner initialisation failed — "
+                f"[ACEStep] WARNING: LM initialisation failed — "
                 f"falling back to DiT-only generation.\n  {exc}",
                 file=sys.stderr,
             )
@@ -264,7 +274,7 @@ class ACEStepPipeline(BasePipeline):
 
         if not lm_success:
             print(
-                f"[ACEStep] WARNING: LM planner initialisation reported failure "
+                f"[ACEStep] WARNING: LM initialisation reported failure "
                 f"({lm_status!r}) — falling back to DiT-only generation.",
                 file=sys.stderr,
             )
@@ -273,7 +283,7 @@ class ACEStepPipeline(BasePipeline):
         self._lm_handler = lm_handler
         self._lm_available = True
         self._lm_model_name = os.path.basename(resolved_lm)
-        print(f"->->-> ACE-Step LM planner ready  {lm_status}", file=sys.stderr)
+        print(f"->->-> ACE-Step LM ready  {lm_status}", file=sys.stderr)
 
     # ------------------------------------------------------------------
     # BasePipeline abstract property implementations
@@ -314,11 +324,9 @@ class ACEStepPipeline(BasePipeline):
                       lets ACE-Step choose automatically.
         ============  =====================================================
 
-        When the LM lyric planner is active and the request contains
-        non-empty, non-instrumental lyrics, the planner runs first and
-        its ``audio_codes`` output is forwarded to the DiT for structured
-        generation (matching the quality of standalone ACE-Step).  For
-        instrumental requests the LM step is skipped automatically.
+        When the LM is active, ACE-Step's upstream thinking path can generate
+        semantic audio-code hints and metadata before the DiT pass.  Enable it
+        per model or per call with ``thinking=True``.
 
         Args:
             conditioning: List of B condition dicts.
@@ -342,7 +350,102 @@ class ACEStepPipeline(BasePipeline):
             kwargs.get("cfg_scale", self.default_params.get("cfg_scale", 7.0))
         )
         effective_method = str(
-            kwargs.get("scheduler_type", self.default_params.get("scheduler_type", "ode"))
+            kwargs.get(
+                "scheduler_type",
+                kwargs.get("sampler_type", self.default_params.get("sampler_type", "ode")),
+            )
+        )
+        effective_shift = float(kwargs.get("shift", self.default_params.get("shift", 3.0)))
+        effective_use_adg = bool(kwargs.get("use_adg", self.default_params.get("use_adg", False)))
+        effective_cfg_start = float(
+            kwargs.get(
+                "cfg_interval_start",
+                self.default_params.get("cfg_interval_start", 0.0),
+            )
+        )
+        effective_cfg_end = float(
+            kwargs.get(
+                "cfg_interval_end",
+                self.default_params.get("cfg_interval_end", 1.0),
+            )
+        )
+        effective_lm_cfg = float(
+            kwargs.get("lm_cfg_scale", self.default_params.get("lm_cfg_scale", 2.0))
+        )
+        effective_thinking = bool(
+            kwargs.get("thinking", self.default_params.get("thinking", True))
+        )
+        effective_lm_temperature = float(
+            kwargs.get(
+                "lm_temperature",
+                self.default_params.get("lm_temperature", 0.85),
+            )
+        )
+        effective_lm_top_k = int(
+            kwargs.get("lm_top_k", self.default_params.get("lm_top_k", 0))
+        )
+        effective_lm_top_p = float(
+            kwargs.get("lm_top_p", self.default_params.get("lm_top_p", 0.9))
+        )
+        effective_lm_negative_prompt = str(
+            kwargs.get(
+                "lm_negative_prompt",
+                self.default_params.get("lm_negative_prompt", "NO USER INPUT"),
+            )
+        )
+        effective_use_cot_metas = bool(
+            kwargs.get("use_cot_metas", self.default_params.get("use_cot_metas", True))
+        )
+        effective_use_cot_caption = bool(
+            kwargs.get(
+                "use_cot_caption",
+                self.default_params.get("use_cot_caption", False),
+            )
+        )
+        effective_use_cot_language = bool(
+            kwargs.get(
+                "use_cot_language",
+                self.default_params.get("use_cot_language", True),
+            )
+        )
+        effective_use_constrained_decoding = bool(
+            kwargs.get(
+                "use_constrained_decoding",
+                self.default_params.get("use_constrained_decoding", True),
+            )
+        )
+        effective_dcw_enabled = bool(
+            kwargs.get("dcw_enabled", self.default_params.get("dcw_enabled", False))
+        )
+        effective_dcw_mode = str(
+            kwargs.get("dcw_mode", self.default_params.get("dcw_mode", "double"))
+        )
+        effective_dcw_scaler = float(
+            kwargs.get("dcw_scaler", self.default_params.get("dcw_scaler", 0.05))
+        )
+        effective_dcw_high_scaler = float(
+            kwargs.get(
+                "dcw_high_scaler",
+                self.default_params.get("dcw_high_scaler", 0.02),
+            )
+        )
+        effective_dcw_wavelet = str(
+            kwargs.get("dcw_wavelet", self.default_params.get("dcw_wavelet", "haar"))
+        )
+        effective_sampler_mode = str(
+            kwargs.get("sampler_mode", self.default_params.get("sampler_mode", "euler"))
+        )
+        effective_velocity_norm_threshold = float(
+            kwargs.get(
+                "velocity_norm_threshold",
+                self.default_params.get("velocity_norm_threshold", 0.0),
+            )
+        )
+        effective_velocity_ema_factor = float(
+            kwargs.get(
+                "velocity_ema_factor",
+                self.default_params.get("velocity_ema_factor", 0.0),
+            )
         )
         use_random_seed = seed == -1
 
@@ -358,68 +461,78 @@ class ACEStepPipeline(BasePipeline):
                 else None
             )
 
-            # ----------------------------------------------------------
-            # LM lyric-planner pass (when available and lyrics present)
-            # ----------------------------------------------------------
-            audio_code_string: str = ""
-            needs_lm = (
-                self._lm_available
-                and lyrics.strip().lower() not in _INSTRUMENTAL_MARKERS
-            )
-            if needs_lm:
-                try:
-                    with stdout_to_stderr():
-                        lm_result = self._lm_handler.generate_with_stop_condition(
-                            caption=tags,
-                            lyrics=lyrics,
-                            infer_type="llm_dit",
-                            target_duration=duration,
-                        )
-                    if lm_result.get("success", False):
-                        audio_code_string = lm_result.get("audio_codes", "")
-                    else:
-                        print(
-                            f"[ACEStep] WARNING: LM planner returned failure "
-                            f"({lm_result.get('error', 'unknown')}) — "
-                            f"continuing without audio codes.",
-                            file=sys.stderr,
-                        )
-                except Exception as exc:
-                    print(
-                        f"[ACEStep] WARNING: LM planner call raised {exc!r} — "
-                        f"continuing without audio codes.",
-                        file=sys.stderr,
-                    )
+            try:
+                from acestep.inference import (  # type: ignore[import]
+                    GenerationConfig,
+                    GenerationParams,
+                    generate_music as upstream_generate_music,
+                )
+            except ImportError as exc:
+                raise RuntimeError(
+                    "ACE-Step inference API could not be imported after model "
+                    f"initialisation: {exc}"
+                ) from exc
 
-            # ----------------------------------------------------------
-            # DiT generation pass
-            # ----------------------------------------------------------
-            # generate_music may print progress to stdout; redirect so MCP
-            # stdio is not corrupted.
-            generate_kwargs: dict[str, Any] = dict(
-                captions=tags,
+            gen_params = GenerationParams(
+                task_type="text2music",
+                caption=tags,
                 lyrics=lyrics,
+                vocal_language=str(cond.get("vocal_language", "en")),
+                bpm=cond.get("bpm"),
+                keyscale=str(cond.get("keyscale", cond.get("key_scale", ""))),
+                timesignature=str(
+                    cond.get("timesignature", cond.get("time_signature", ""))
+                ),
+                duration=duration if duration is not None else -1.0,
                 inference_steps=int(effective_steps),
                 guidance_scale=effective_cfg,
-                seed=seed,
-                use_random_seed=use_random_seed,
-                audio_duration=duration,
                 infer_method=effective_method,
-                batch_size=1,
+                shift=effective_shift,
+                use_adg=effective_use_adg,
+                cfg_interval_start=effective_cfg_start,
+                cfg_interval_end=effective_cfg_end,
+                thinking=effective_thinking,
+                lm_temperature=effective_lm_temperature,
+                lm_cfg_scale=effective_lm_cfg,
+                lm_top_k=effective_lm_top_k,
+                lm_top_p=effective_lm_top_p,
+                lm_negative_prompt=effective_lm_negative_prompt,
+                use_cot_metas=effective_use_cot_metas,
+                use_cot_caption=effective_use_cot_caption,
+                use_cot_language=effective_use_cot_language,
+                use_constrained_decoding=effective_use_constrained_decoding,
+                sampler_mode=effective_sampler_mode,
+                velocity_norm_threshold=effective_velocity_norm_threshold,
+                velocity_ema_factor=effective_velocity_ema_factor,
+                dcw_enabled=effective_dcw_enabled,
+                dcw_mode=effective_dcw_mode,
+                dcw_scaler=effective_dcw_scaler,
+                dcw_high_scaler=effective_dcw_high_scaler,
+                dcw_wavelet=effective_dcw_wavelet,
             )
-            if audio_code_string:
-                generate_kwargs["audio_code_string"] = audio_code_string
+            gen_config = GenerationConfig(
+                batch_size=1,
+                use_random_seed=use_random_seed,
+                seeds=None if use_random_seed else [int(seed)],
+                audio_format="wav",
+            )
 
             with stdout_to_stderr():
-                result = self._handler.generate_music(**generate_kwargs)
-
-            if not result.get("success", False):
-                raise RuntimeError(
-                    f"ACE-Step generation failed: "
-                    f"{result.get('error', 'unknown error')}"
+                result = upstream_generate_music(
+                    self._handler,
+                    self._lm_handler if self._lm_available else None,
+                    params=gen_params,
+                    config=gen_config,
+                    save_dir=None,
                 )
 
-            audios: list[dict[str, Any]] = result.get("audios", [])
+            if not result.success:
+                raise RuntimeError(
+                    f"ACE-Step generation failed: "
+                    f"{result.error or result.status_message or 'unknown error'}"
+                )
+
+            audios: list[dict[str, Any]] = result.audios
             if not audios:
                 raise RuntimeError(
                     "ACE-Step returned an empty audio list; "

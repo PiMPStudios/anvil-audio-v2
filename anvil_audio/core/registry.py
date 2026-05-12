@@ -57,6 +57,11 @@ _DEFAULT_PARAMS: dict[str, Any] = {
     "sigma_max": 500.0,
 }
 
+
+def _default_acestep_project_root() -> str:
+    """Return Anvil's cache-backed ACE-Step project root."""
+    return str(Path.home() / ".cache" / "anvil-audio" / "acestep")
+
 # ---------------------------------------------------------------------------
 # RegistryEntry
 # ---------------------------------------------------------------------------
@@ -96,12 +101,11 @@ class RegistryEntry:
                             ``~/.cache/anvil-audio/mlx-weights/<model-slug>/``.
                             Only used when ``pipeline_type == "mlx_diffusion"``.
         lm_model_path:      Path (relative to ``checkpoints/``) or absolute
-                            path to the ACE-Step 5 Hz LM lyric-planner
+                            path to the ACE-Step 5 Hz LM
                             checkpoint directory.  Typical values:
                             ``"acestep-5Hz-lm-1.7B"`` (lighter/faster) or
                             ``"acestep-5Hz-lm-4B"`` (higher quality).  ``None``
-                            disables LM planning for this entry; generation
-                            falls back to direct DiT with the raw lyric text.
+                            disables LM thinking/code hints for this entry.
                             Only used when ``pipeline_type == "acestep"``.
                             Can also be set globally via the
                             ``ACESTEP_LM_MODEL_PATH`` environment variable.
@@ -129,11 +133,14 @@ class RegistryEntry:
 
     def __post_init__(self) -> None:
         if self.pipeline_type == "acestep":
-            # Resolve project_root: explicit value > env var > None (deferred error at load time)
+            # Built-in ACE-Step models use Anvil's cache root.  Local checkouts
+            # can still be selected explicitly with acestep_project_root.
             if self.acestep_project_root is None:
-                env_root = os.environ.get("ACESTEP_PROJECT_ROOT")
-                if env_root:
-                    object.__setattr__(self, "acestep_project_root", env_root)
+                object.__setattr__(
+                    self,
+                    "acestep_project_root",
+                    _default_acestep_project_root(),
+                )
 
     def resolved_params(self) -> dict[str, Any]:
         """Return generation params merged over the global defaults."""
@@ -268,9 +275,9 @@ class ModelRegistry:
         ]
 
         # ACE-Step v1.5 built-in entries.
-        # project_root is resolved in __post_init__ from the ACESTEP_PROJECT_ROOT
-        # env var when acestep_project_root is None.  Entries are always registered;
-        # a clear error is raised at pipeline load time if the root is still unset.
+        # project_root is resolved in __post_init__ to Anvil's cache root when
+        # acestep_project_root is None.  Entries are always registered; a clear
+        # error is raised at pipeline load time if dependencies are missing.
         builtin += [
             RegistryEntry(
                 name="acestep-v1.5-turbo",
@@ -280,10 +287,22 @@ class ModelRegistry:
                 lm_model_path="acestep-5Hz-lm-1.7B",
                 max_duration=600.0,
                 default_params={
-                    "steps": 50,
-                    "cfg_scale": 4.0,
+                    "steps": 8,
+                    "cfg_scale": 1.0,
                     "audio_duration": 60,
                     "sampler_type": "ode",
+                    "shift": 3.0,
+                    "use_adg": False,
+                    "cfg_interval_start": 0.0,
+                    "cfg_interval_end": 1.0,
+                    "lm_cfg_scale": 2.0,
+                    "thinking": True,
+                    "use_cot_metas": True,
+                    "use_cot_caption": False,
+                    "use_cot_language": True,
+                    "dcw_enabled": False,
+                    "velocity_norm_threshold": 0.0,
+                    "velocity_ema_factor": 0.0,
                     "sigma_min": 0.0,
                     "sigma_max": 0.0,
                 },
@@ -296,10 +315,22 @@ class ModelRegistry:
                 lm_model_path="acestep-5Hz-lm-4B",
                 max_duration=600.0,
                 default_params={
-                    "steps": 100,
-                    "cfg_scale": 4.0,
+                    "steps": 50,
+                    "cfg_scale": 7.5,
                     "audio_duration": 60,
                     "sampler_type": "ode",
+                    "shift": 3.0,
+                    "use_adg": False,
+                    "cfg_interval_start": 0.0,
+                    "cfg_interval_end": 1.0,
+                    "lm_cfg_scale": 2.0,
+                    "thinking": False,
+                    "use_cot_metas": False,
+                    "use_cot_caption": False,
+                    "use_cot_language": False,
+                    "dcw_enabled": False,
+                    "velocity_norm_threshold": 0.0,
+                    "velocity_ema_factor": 0.0,
                     "sigma_min": 0.0,
                     "sigma_max": 0.0,
                 },

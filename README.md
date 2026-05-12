@@ -156,13 +156,14 @@ registry and UI as Stable Audio — no separate server or app required, and no m
 
 ACE-Step is **optional**. If you don't install it, all other Anvil functionality works as normal.
 
-### LM lyric planner
+### LM thinking
 
-ACE-Step ships a separate 5 Hz LM lyric planner that produces structured `audio_codes` fed
-into the DiT. Using it gives significantly better vocal structure and timing compared to
-passing raw lyric text directly — this is the path the standalone ACE-Step Gradio UI uses.
+ACE-Step ships a separate 5 Hz LM that produces structured `audio_codes` fed
+into the DiT. Anvil can initialise that LM automatically, but the built-in SFT
+entry defaults to the direct DiT conditioning path used by AnvilApp because that
+path is the known-good local baseline for blank-lyrics SFT generation.
 
-Anvil initialises the LM planner automatically using the checkpoint specified in the registry
+Anvil initialises the LM automatically using the checkpoint specified in the registry
 entry. The built-in entries default to:
 
 | Model | LM checkpoint |
@@ -180,16 +181,21 @@ for all ACE-Step models via an environment variable:
 export ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-4B
 ```
 
-If the LM planner fails to initialise (missing checkpoint, memory constraints, etc.) Anvil
-falls back gracefully to DiT-only generation and prints a warning. For purely instrumental
-tracks the LM step is skipped automatically regardless of the setting.
+If the LM fails to initialise (missing checkpoint, memory constraints, etc.) Anvil
+falls back gracefully to DiT-only generation and prints a warning. You can enable
+LM thinking explicitly with registry defaults or per-call overrides when you want
+ACE-Step to generate semantic code hints and metadata.
 
 ### Apple Silicon acceleration
 
 On macOS, Anvil automatically sets `ACESTEP_LM_BACKEND=mlx` before initializing ACE-Step,
-enabling the MLX backend for the 5Hz LM lyric planner (unless you've already set the variable
-yourself). The DiT and VAE also run via native MLX on Apple Silicon automatically — no flags
-needed.
+enabling the MLX backend for the 5 Hz LM (unless you've already set the variable yourself).
+The DiT and VAE also run via native MLX on Apple Silicon automatically.
+To compare against the non-MLX DiT/VAE backend, launch with:
+
+```bash
+ANVIL_ACESTEP_USE_MLX_DIT=0 python run_gradio.py
+```
 
 If you run the ACE-Step MCP server or API separately, set the variable in your shell or MCP
 `env` block:
@@ -200,12 +206,18 @@ export ACESTEP_LM_BACKEND=mlx
 
 ### Built-in registry entries
 
-Anvil registers two ACE-Step variants automatically when the repo is found:
+Anvil registers two ACE-Step variants automatically and stores their downloaded
+weights under `~/.cache/anvil-audio/acestep/checkpoints`:
 
 | Model name | Description | Steps | Notes |
 |---|---|---|---|
-| `acestep-v1.5-turbo` | Fast generation | 50 | Good for drafts and quick iteration |
-| `acestep-v1.5-sft` | Full quality | 100 | Better for final exports |
+| `acestep-v1.5-turbo` | Fast generation | 8 | Good for drafts and quick iteration |
+| `acestep-v1.5-sft` | Full quality | 50 | Direct DiT conditioning, guidance 7.5, shift 3.0, experimental DCW off |
+
+The SFT built-in intentionally disables ACE-Step's experimental DCW sampler
+correction and LM thinking by default. That matches AnvilApp's known-good
+MLX-Swift path for blank-lyrics SFT generation; enable those options explicitly
+only when you want to experiment with ACE-Step's LM/code-hint path.
 
 ### CLI
 
@@ -502,17 +514,22 @@ with the same name as a built-in will override it.
 ```yaml
 - name: my-acestep-finetune
   pipeline_type: acestep
-  model_config_path: acestep-v15-turbo        # checkpoint variant name
-  # Optional: override the LM lyric-planner checkpoint.
+  model_config_path: acestep-v15-sft          # checkpoint variant name
+  # Built-in models use ~/.cache/anvil-audio/acestep automatically.
+  # Set this only when using a local ACE-Step checkout or custom checkpoint root.
+  acestep_project_root: /path/to/ACE-Step-1.5
+  # Optional: override the LM checkpoint.
   # Omit to use the built-in default (1.7B for turbo, 4B for sft).
-  lm_model_path: acestep-5Hz-lm-1.7B
+  lm_model_path: acestep-5Hz-lm-4B
   default_params:
     steps: 50
-    cfg_scale: 4.0
+    cfg_scale: 7.5
     audio_duration: 60
+    shift: 3.0
+    lm_cfg_scale: 2.0
+    thinking: false
+    dcw_enabled: false
 ```
-
-> If you have a local ACE-Step checkout (e.g. a fine-tune), add `acestep_project_root: /path/to/ACE-Step-1.5` to point Anvil at it instead of the pip-installed package.
 
 ---
 

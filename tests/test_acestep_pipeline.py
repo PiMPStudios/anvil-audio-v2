@@ -1,8 +1,11 @@
 """Tests for ACEStepPipeline without project_root."""
 
 import sys
+import types
+from types import SimpleNamespace
 
 import pytest
+import torch
 
 
 def test_import_error_without_project_root_gives_clear_message(monkeypatch):
@@ -51,3 +54,105 @@ def test_project_root_none_skips_sys_path_injection(monkeypatch):
 
     new_entries = [p for p in sys.path if p not in path_before]
     assert not new_entries, f"sys.path was mutated with project_root=None: {new_entries}"
+
+
+def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path):
+    """Blank-lyrics SFT requests should match AnvilApp's direct DiT path."""
+    calls = {}
+
+    class FakeAceStepHandler:
+        def initialize_service(self, **kwargs):
+            calls["initialize_service"] = kwargs
+            return "ok", True
+
+    class FakeLLMHandler:
+        llm_initialized = True
+
+        def initialize(self, **kwargs):
+            calls["initialize_lm"] = kwargs
+            return "lm ok", True
+
+    class FakeGenerationParams:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class FakeGenerationConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    def fake_generate_music(dit_handler, llm_handler, params, config, save_dir=None, progress=None):
+        calls["generate_music"] = {
+            "llm_handler": llm_handler,
+            "params": params,
+            "config": config,
+            "save_dir": save_dir,
+        }
+        return SimpleNamespace(
+            success=True,
+            error=None,
+            status_message="ok",
+            audios=[{"tensor": torch.zeros(2, 16), "sample_rate": 48000}],
+        )
+
+    acestep_pkg = types.ModuleType("acestep")
+    handler_mod = types.ModuleType("acestep.handler")
+    handler_mod.AceStepHandler = FakeAceStepHandler
+    lm_mod = types.ModuleType("acestep.llm_inference")
+    lm_mod.LLMHandler = FakeLLMHandler
+    inference_mod = types.ModuleType("acestep.inference")
+    inference_mod.GenerationParams = FakeGenerationParams
+    inference_mod.GenerationConfig = FakeGenerationConfig
+    inference_mod.generate_music = fake_generate_music
+
+    monkeypatch.setitem(sys.modules, "acestep", acestep_pkg)
+    monkeypatch.setitem(sys.modules, "acestep.handler", handler_mod)
+    monkeypatch.setitem(sys.modules, "acestep.llm_inference", lm_mod)
+    monkeypatch.setitem(sys.modules, "acestep.inference", inference_mod)
+    monkeypatch.setenv("ANVIL_ACESTEP_USE_MLX_DIT", "0")
+
+    from anvil_audio.pipelines.acestep import ACEStepPipeline
+
+    pipe = ACEStepPipeline(
+        project_root=str(tmp_path),
+        config_path="acestep-v15-sft",
+        device="cpu",
+        lm_model_path="acestep-5Hz-lm-4B",
+        default_params={
+            "steps": 50,
+            "cfg_scale": 7.5,
+            "shift": 3.0,
+            "lm_cfg_scale": 2.0,
+            "thinking": False,
+            "use_cot_metas": False,
+            "use_cot_caption": False,
+            "use_cot_language": False,
+            "dcw_enabled": False,
+            "velocity_norm_threshold": 0.0,
+            "velocity_ema_factor": 0.0,
+        },
+    )
+    audio = pipe.generate(
+        [{"prompt": "instrumental rock", "lyrics": "", "seconds_total": 10}],
+        seed=123,
+    )
+
+    assert audio.shape == (1, 2, 16)
+    assert calls["initialize_service"]["use_mlx_dit"] is False
+    assert calls["generate_music"]["llm_handler"] is not None
+    params = calls["generate_music"]["params"]
+    assert params.lyrics == ""
+    assert params.vocal_language == "en"
+    assert params.thinking is False
+    assert params.use_cot_metas is False
+    assert params.use_cot_caption is False
+    assert params.use_cot_language is False
+    assert params.dcw_enabled is False
+    assert params.velocity_norm_threshold == 0.0
+    assert params.velocity_ema_factor == 0.0
+    assert params.lm_cfg_scale == 2.0
+    assert params.inference_steps == 50
+    assert params.guidance_scale == 7.5
+    assert params.shift == 3.0
+    config = calls["generate_music"]["config"]
+    assert config.use_random_seed is False
+    assert config.seeds == [123]
