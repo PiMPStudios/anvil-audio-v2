@@ -533,6 +533,7 @@ anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
 anvil lora preprocess ./datasets/my_style_YYYYMMDD_HHMMSS \
     --output-dir ./tensors/my_style \
     --model-variant sft \
+    --precision fp32 \
     --custom-tag my_style
 
 # 3. Train with ACE-Step's corrected training_v2 fixed LoRA trainer
@@ -549,6 +550,11 @@ anvil lora import-local ./lora-runs/my_style/final --name my-style
 
 `anvil lora train` writes an inference-ready PEFT adapter under
 `<output-dir>/final/`, which ACE-Step can load directly.
+
+On Apple Silicon, add `--basic-loop` if Lightning Fabric fails with MPS AMP
+gradient-scaler errors. This uses ACE-Step's own non-Fabric training loop.
+Keep preprocessing at `--precision fp32`; lower precision can produce non-finite
+conditioning tensors on the Apple path.
 
 ---
 
@@ -909,10 +915,12 @@ load and prints the explicit install command.
 | `--base-model` | `acestep-v1.5` | Compatibility note for adapter metadata |
 | `--checkpoint-dir` | Anvil ACE-Step cache | ACE-Step checkpoints root |
 | `--model-variant` | `sft` | `turbo`, `base`, `sft`, or custom folder name |
+| `--precision` | `fp32` for preprocess | Preprocess/train precision |
 | `--custom-tag` | blank | Trigger tag prepended during preprocessing |
 | `--output-dir` | required | Tensor or training output directory |
 | `--epochs` | `100` | Training epochs |
 | `--rank` / `--alpha` | `64` / `128` | LoRA rank and alpha |
+| `--basic-loop` | off | Use ACE-Step's non-Fabric loop for MPS AMP issues |
 | `--dry-run` | off | Print the ACE-Step training command |
 
 ---

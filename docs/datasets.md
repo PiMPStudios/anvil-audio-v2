@@ -60,11 +60,28 @@ like this:
 anvil lora preprocess ./datasets/my_style_20260512_140000 \
     --output-dir ./tensors/my_style \
     --model-variant sft \
+    --precision fp32 \
     --custom-tag my_style
 ```
 
 This writes `acestep_dataset.json` into the dataset folder, then delegates to
 ACE-Step's `training_v2` preprocessing pipeline to produce `.pt` tensors.
+Anvil validates the tensor files after preprocessing and fails fast if any
+non-finite conditioning values are written.
+
+Then run training from those tensors:
+
+```bash
+anvil lora train ./tensors/my_style \
+    --output-dir ./lora-runs/my_style \
+    --model-variant sft \
+    --epochs 20
+```
+
+On Apple Silicon, add `--basic-loop` if Lightning Fabric hits MPS AMP gradient
+scaler errors before the first optimizer step. Keep preprocessing at
+`--precision fp32`; lower precision can poison the training tensors on the
+Apple path.
 
 ## Legacy Stable Audio Dataset Config
 

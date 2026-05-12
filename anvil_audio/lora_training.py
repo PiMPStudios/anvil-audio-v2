@@ -9,6 +9,7 @@ heavy lifting to ACE-Step's own training_v2 code.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ class LoRATrainConfig:
     num_workers: int | None = None
     yes: bool = True
     plain: bool = True
+    basic_loop: bool = False
 
 
 def default_checkpoint_dir() -> Path:
@@ -147,7 +149,7 @@ def preprocess_for_acestep(
     model_variant: str = "sft",
     max_duration: float = 240.0,
     device: str = "auto",
-    precision: str = "auto",
+    precision: str = "fp32",
     custom_tag: str = "",
     lyrics: str = "[Instrumental]",
     genre: str = "",
@@ -168,7 +170,7 @@ def preprocess_for_acestep(
             "with `pip install anvil-audio[acestep]` or rerun `bash install.sh`."
         ) from exc
 
-    return preprocess_audio_files(
+    result = preprocess_audio_files(
         audio_dir=str((dataset_dir / "clips").resolve()),
         output_dir=str(tensor_output.expanduser().resolve()),
         checkpoint_dir=str(checkpoint_root.expanduser().resolve()),
@@ -178,20 +180,18 @@ def preprocess_for_acestep(
         device=device,
         precision=precision,
     )
+    validate_preprocessed_tensors(tensor_output)
+    return result
 
 
 def build_train_command(config: LoRATrainConfig) -> list[str]:
     """Build the subprocess command for ACE-Step fixed LoRA training."""
-    command = [
-        sys.executable,
-        "-m",
-        "acestep.training_v2.cli.train_fixed",
-    ]
+    args: list[str] = []
     if config.plain:
-        command.append("--plain")
+        args.append("--plain")
     if config.yes:
-        command.append("--yes")
-    command.extend(
+        args.append("--yes")
+    args.extend(
         [
             "--checkpoint-dir",
             str(config.checkpoint_dir.expanduser().resolve()),
@@ -232,16 +232,130 @@ def build_train_command(config: LoRATrainConfig) -> list[str]:
         ]
     )
     if config.base_model:
-        command.extend(["--base-model", config.base_model])
+        args.extend(["--base-model", config.base_model])
     if config.num_workers is not None:
-        command.extend(["--num-workers", str(config.num_workers)])
-    return command
+        args.extend(["--num-workers", str(config.num_workers)])
+
+    if config.basic_loop:
+        runner = (
+            "from acestep.training_v2 import trainer_fixed\n"
+            "trainer_fixed._FABRIC_AVAILABLE = False\n"
+            "from acestep.training_v2.cli.train_fixed import main\n"
+            "raise SystemExit(main())\n"
+        )
+        return [sys.executable, "-c", runner, *args]
+
+    return [sys.executable, "-m", "acestep.training_v2.cli.train_fixed", *args]
 
 
 def run_lora_training(config: LoRATrainConfig) -> int:
     """Launch ACE-Step fixed LoRA training and return the subprocess code."""
     command = build_train_command(config)
-    return subprocess.run(command, check=False).returncode
+    result = subprocess.run(
+        command,
+        check=False,
+        cwd=str(_training_safe_root(config)),
+    )
+    if result.returncode != 0:
+        return result.returncode
+    if not adapter_output_exists(config.output_dir):
+        print(
+            "ACE-Step training exited without writing a final adapter; "
+            "treating the run as failed.",
+            file=sys.stderr,
+        )
+        return 1
+    if not adapter_output_is_finite(config.output_dir):
+        print(
+            "ACE-Step training wrote a final adapter with non-finite weights; "
+            "treating the run as failed.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def adapter_output_exists(output_dir: Path) -> bool:
+    """Return true when ACE-Step wrote an inference-ready adapter."""
+    final_dir = output_dir.expanduser().resolve() / "final"
+    peft = (
+        (final_dir / "adapter_config.json").is_file()
+        and (
+            (final_dir / "adapter_model.safetensors").is_file()
+            or (final_dir / "adapter_model.bin").is_file()
+        )
+    )
+    lokr = (final_dir / "lokr_weights.safetensors").is_file()
+    return peft or lokr
+
+
+def adapter_output_is_finite(output_dir: Path) -> bool:
+    """Return true when all floating adapter tensors are finite."""
+    final_dir = output_dir.expanduser().resolve() / "final"
+    safetensors_path = final_dir / "adapter_model.safetensors"
+    if not safetensors_path.is_file():
+        safetensors_path = final_dir / "lokr_weights.safetensors"
+    if safetensors_path.is_file():
+        from safetensors.torch import load_file
+
+        return _all_tensors_finite(load_file(safetensors_path))
+
+    bin_path = final_dir / "adapter_model.bin"
+    if bin_path.is_file():
+        import torch
+
+        return _all_tensors_finite(torch.load(bin_path, map_location="cpu"))
+    return False
+
+
+def validate_preprocessed_tensors(tensor_dir: Path) -> None:
+    """Raise if ACE-Step preprocessing wrote non-finite tensor values."""
+    import torch
+
+    tensor_dir = tensor_dir.expanduser().resolve()
+    bad: dict[str, list[str]] = {}
+    for path in sorted(tensor_dir.glob("*.pt")):
+        payload = torch.load(path, map_location="cpu")
+        if not isinstance(payload, dict):
+            continue
+        for key, value in payload.items():
+            if (
+                torch.is_tensor(value)
+                and torch.is_floating_point(value)
+                and not bool(torch.isfinite(value).all())
+            ):
+                bad.setdefault(path.name, []).append(key)
+    if bad:
+        preview = "; ".join(
+            f"{name}: {', '.join(keys)}" for name, keys in list(bad.items())[:5]
+        )
+        raise RuntimeError(
+            "ACE-Step preprocessing wrote non-finite tensors "
+            f"({preview}). Retry with `--precision fp32`."
+        )
+
+
+def _all_tensors_finite(value: Any) -> bool:
+    import torch
+
+    if torch.is_tensor(value):
+        return not torch.is_floating_point(value) or bool(torch.isfinite(value).all())
+    if isinstance(value, dict):
+        return all(_all_tensors_finite(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_all_tensors_finite(item) for item in value)
+    return True
+
+
+def _training_safe_root(config: LoRATrainConfig) -> Path:
+    """Choose a CWD compatible with ACE-Step's safe-path checks."""
+    tensor_parent = config.tensor_dir.expanduser().resolve().parent
+    output_parent = config.output_dir.expanduser().resolve().parent
+    common = Path(os.path.commonpath([str(tensor_parent), str(output_parent)]))
+    if common == Path("/"):
+        common = tensor_parent
+    common.mkdir(parents=True, exist_ok=True)
+    return common
 
 
 def _is_instrumental(caption: str, lyrics: str) -> bool:

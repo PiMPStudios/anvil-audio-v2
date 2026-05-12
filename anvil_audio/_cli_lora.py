@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
@@ -100,9 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess.add_argument("--device", default="auto", help="auto, mps, cuda, cpu.")
     preprocess.add_argument(
         "--precision",
-        default="auto",
+        default="fp32",
         choices=("auto", "bf16", "fp16", "fp32"),
-        help="Preprocessing precision.",
+        help="Preprocessing precision. Default: fp32.",
     )
     _add_dataset_metadata_args(preprocess)
 
@@ -171,6 +172,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow ACE-Step Rich output instead of plain terminal output.",
     )
+    train.add_argument(
+        "--basic-loop",
+        action="store_true",
+        help=(
+            "Use ACE-Step's non-Fabric PyTorch loop. Useful on Apple MPS when "
+            "Lightning Fabric AMP fails before the first optimizer step."
+        ),
+    )
 
     return parser
 
@@ -216,7 +225,7 @@ def main() -> None:
         elif args.command == "train":
             config = _train_config_from_args(args)
             if args.dry_run:
-                print(" ".join(build_train_command(config)))
+                print(shlex.join(build_train_command(config)))
                 return
             code = run_lora_training(config)
             if code != 0:
@@ -303,6 +312,7 @@ def _train_config_from_args(args: argparse.Namespace) -> LoRATrainConfig:
         num_workers=args.num_workers,
         yes=not args.no_yes,
         plain=not args.rich,
+        basic_loop=args.basic_loop,
     )
 
 

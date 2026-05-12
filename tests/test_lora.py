@@ -9,7 +9,10 @@ from anvil_audio.lora import (
 )
 from anvil_audio.lora_training import (
     LoRATrainConfig,
+    adapter_output_is_finite,
+    adapter_output_exists,
     build_train_command,
+    validate_preprocessed_tensors,
     write_acestep_dataset_json,
 )
 
@@ -108,3 +111,59 @@ def test_build_train_command_targets_fixed_trainer(tmp_path):
     assert "--plain" in command
     assert command[command.index("--epochs") + 1] == "3"
     assert command[command.index("--rank") + 1] == "8"
+
+
+def test_build_train_command_can_force_basic_loop(tmp_path):
+    config = LoRATrainConfig(
+        tensor_dir=tmp_path / "tensors",
+        output_dir=tmp_path / "out",
+        checkpoint_dir=tmp_path / "checkpoints",
+        basic_loop=True,
+    )
+
+    command = build_train_command(config)
+
+    assert command[1] == "-c"
+    assert "trainer_fixed._FABRIC_AVAILABLE = False" in command[2]
+    assert "--dataset-dir" in command
+
+
+def test_adapter_output_exists_detects_peft_final(tmp_path):
+    final = tmp_path / "out" / "final"
+    _write_fake_peft_adapter(final)
+
+    assert adapter_output_exists(tmp_path / "out") is True
+    assert adapter_output_exists(tmp_path / "missing") is False
+
+
+def test_adapter_output_is_finite_rejects_nan_weights(tmp_path):
+    import torch
+    from safetensors.torch import save_file
+
+    final = tmp_path / "out" / "final"
+    final.mkdir(parents=True)
+    (final / "adapter_config.json").write_text("{}", encoding="utf-8")
+    save_file({"ok": torch.ones(1)}, final / "adapter_model.safetensors")
+
+    assert adapter_output_is_finite(tmp_path / "out") is True
+
+    save_file({"bad": torch.tensor([float("nan")])}, final / "adapter_model.safetensors")
+
+    assert adapter_output_is_finite(tmp_path / "out") is False
+
+
+def test_validate_preprocessed_tensors_rejects_nonfinite_values(tmp_path):
+    import pytest
+    import torch
+
+    torch.save({"encoder_hidden_states": torch.ones(1)}, tmp_path / "ok.pt")
+
+    validate_preprocessed_tensors(tmp_path)
+
+    torch.save(
+        {"encoder_hidden_states": torch.tensor([float("nan")])},
+        tmp_path / "bad.pt",
+    )
+
+    with pytest.raises(RuntimeError, match="non-finite tensors"):
+        validate_preprocessed_tensors(tmp_path)
