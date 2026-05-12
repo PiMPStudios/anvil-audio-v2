@@ -48,7 +48,7 @@ mlx = [
     "mlx-audiogen",
 ]
 acestep = [
-    "ace-step @ git+https://github.com/PiMPStudios/ACE-Step-1.5.git",
+    "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git",
 ]
 apple = [
     "anvil-audio[mlx]",
