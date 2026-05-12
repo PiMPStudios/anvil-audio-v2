@@ -59,12 +59,16 @@ anvil = "anvil_audio.cli:main"
 mlx = [
     "mlx-audiogen",
 ]
+intelligence = [
+    "mlx-lm",
+]
 acestep = [
     "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git",
 ]
 apple = [
     "anvil-audio[mlx]",
     "anvil-audio[acestep]",
+    "anvil-audio[intelligence]",
 ]
 cuda = [
     "anvil-audio[acestep]",

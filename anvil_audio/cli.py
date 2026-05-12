@@ -26,6 +26,7 @@ def main() -> None:
     sys.argv = [a for a in sys.argv if a != "--verbose"]
     if not _verbose:
         from anvil_audio._warning_filters import apply_filters
+
         apply_filters()
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
@@ -36,6 +37,7 @@ def main() -> None:
     if sys.argv[1] == "--list-models":
         sys.argv = ["anvil generate", "--list-models"]
         from anvil_audio._cli_generate import main as gen_main
+
         gen_main()
         return
 
@@ -45,7 +47,12 @@ def main() -> None:
 
     if sub == "generate":
         from anvil_audio._cli_generate import main as gen_main
+
         gen_main()
+    elif sub == "enhance-prompt":
+        from anvil_audio._cli_intelligence import main as intelligence_main
+
+        intelligence_main()
     elif sub == "setup":
         _cmd_setup(_parse_setup_args())
     else:
@@ -108,6 +115,7 @@ def _print_help() -> None:
         "\n"
         "Subcommands:\n"
         "  generate    Generate audio from a model and prompt\n"
+        "  enhance-prompt  Enhance a prompt and optionally write lyrics\n"
         "  setup       Check environment and optionally pre-download model weights\n"
         "\n"
         "Run 'anvil <subcommand> --help' for subcommand options.\n"

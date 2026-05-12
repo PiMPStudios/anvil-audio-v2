@@ -25,6 +25,9 @@ registry, CLI, and Gradio UI.
 - **`anvil generate` CLI** — multi-GPU via Accelerate, wav/flac/mp3/ogg output, batch YAML conditions, per-run seed control; `anvil --list-models` works at the top level.
 - **Gradio web UI** — project name, seed input, live metadata panel, model dropdown with hot-reload, device field.
 - **Built-in audio editor** — post-processing tab with normalize, trim, fade, time stretch, pitch shift, EQ, and reverb; non-destructive exports with full effects sidecar.
+- **Local prompt intelligence** — optional MLX Llama prompt enhancement,
+  negative-prompt suggestions, and duration-aware lyric writing on Apple
+  Silicon.
 - **MCP server** — expose all generation and editing capabilities to Claude and other MCP clients over stdio; models are cached between calls.
 - **Python 3.12 / 3.13** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout.
 
@@ -53,7 +56,10 @@ source .venv/bin/activate
 bash install.sh
 ```
 
-The script detects your platform, installs the right PyTorch build, adds `pytest` for local verification, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step. No separate repo clones required.
+The script detects your platform, installs the right PyTorch build, adds
+`pytest` for local verification, enables MLX acceleration and local prompt
+intelligence on Apple Silicon, and optionally installs ACE-Step for music
+generation — all in one step. No separate repo clones required.
 
 ### Windows
 
@@ -72,7 +78,8 @@ python3.13 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 
 pip install .                      # core install
-pip install mlx-audiogen           # Apple Silicon only: MLX acceleration
+# Apple Silicon only: MLX acceleration + local intelligence
+pip install mlx-audiogen mlx-lm
 pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
 pip install pytest                 # optional: run the local test suite
 ```
@@ -348,6 +355,47 @@ The **Negative prompt** field is available for every model. For ACE-Step, it is
 passed to ACE-Step's LM/thinking path as `lm_negative_prompt`; direct DiT-only
 SFT generation keeps it in metadata, but upstream ACE-Step does not expose a
 separate DiT negative-prompt control.
+
+### Local prompt intelligence
+
+On Apple Silicon, Anvil can use a local MLX Llama model to enhance prompts,
+suggest negative prompts, and write duration-aware lyrics. The default model is
+`mlx-community/Llama-3.2-3B-Instruct-4bit`, the same local model family used by
+AnvilApp. If AnvilApp already has it downloaded, this repo reuses:
+
+```text
+~/Library/Application Support/Anvil/LLM/llama-3.2-3b-instruct-4bit/
+```
+
+Otherwise, first use downloads the model into:
+
+```text
+~/.cache/anvil-audio/llm/llama-3.2-3b-instruct-4bit/
+```
+
+You can override the model with `ANVIL_LLM_MODEL`, `ANVIL_LLM_MODEL_PATH`, or
+the CLI `--model` / `--intelligence-model` flags.
+
+CLI helper:
+
+```bash
+anvil enhance-prompt \
+    --prompt "anthemic alternative rock with emotional male vocal" \
+    --duration 60
+```
+
+Generate with automatic prompt enhancement and lyric writing:
+
+```bash
+anvil generate --model acestep-v1.5-sft \
+    --prompt "anthemic alternative rock with emotional male vocal" \
+    --seconds-total 60 \
+    --enhance-prompt \
+    --write-lyrics
+```
+
+In Gradio, use **Enhance Prompt**, **Write Lyrics**, or **Enhance + Lyrics**
+above the generation controls.
 
 ---
 
@@ -652,6 +700,9 @@ load and prints the explicit install command.
 | `--seconds-start` | `0.0` | Start time (seconds) |
 | `--seconds-total` | `30.0` | Duration (seconds) |
 | `--negative-prompt` | blank | Text describing sounds or qualities to avoid |
+| `--enhance-prompt` | off | Enhance prompt and negative prompt |
+| `--write-lyrics` | off | Write duration-aware ACE-Step lyrics |
+| `--intelligence-model` | default | LLM path or HuggingFace repo |
 | `--output-dir` | `./output` | Output directory |
 | `--format` | `wav` | `wav`, `flac`, `mp3`, or `ogg` |
 | `--clip-length` | off | Clip to `seconds_total` |

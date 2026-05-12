@@ -28,13 +28,17 @@ from typing import Any
 
 import numpy as np
 import torch
-import torchaudio
 from accelerate import Accelerator
 
 from anvil_audio.core import load_pipeline, registry
 from anvil_audio.core.output import GenerationMetadata, OutputManager
 from anvil_audio.core.pipeline import DiffusionPipeline
-from anvil_audio.utils.torch_common import count_parameters, get_rank, get_world_size, get_best_device
+from anvil_audio.utils.torch_common import (
+    count_parameters,
+    get_rank,
+    get_world_size,
+    get_best_device,
+)
 from anvil_audio.utils.audio_utils import float_to_int16_audio
 
 SUPPORTED_FORMATS = ("wav", "flac", "mp3", "ogg")
@@ -43,6 +47,7 @@ SUPPORTED_FORMATS = ("wav", "flac", "mp3", "ogg")
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -58,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         metavar="NAME",
         help="Registry model name (e.g. 'stable-audio-open-1.0'). "
-             "Use --list-models to see available names.",
+        "Use --list-models to see available names.",
     )
     model_group.add_argument(
         "--list-models",
@@ -119,6 +124,22 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Text describing sounds or qualities to avoid. Default: blank.",
     )
+    p.add_argument(
+        "--enhance-prompt",
+        action="store_true",
+        help="Enhance prompt and negative prompt with the local MLX LLM before generation.",
+    )
+    p.add_argument(
+        "--write-lyrics",
+        action="store_true",
+        help="Write duration-aware ACE-Step lyrics from the final prompt before generation.",
+    )
+    p.add_argument(
+        "--intelligence-model",
+        type=str,
+        default=None,
+        help="Optional local path or HuggingFace repo for prompt/lyric intelligence.",
+    )
 
     # ---- Output ----
     p.add_argument(
@@ -141,22 +162,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # ---- Sampling ----
-    p.add_argument("--sample-steps", type=int, default=None,
-                   help="Diffusion steps. Overrides registry/config default.")
-    p.add_argument("--cfg-scale", type=float, default=None,
-                   help="Classifier-free guidance scale. Overrides default.")
-    p.add_argument("--sampler-type", type=str, default=None,
-                   help="Sampler type. Overrides default.")
-    p.add_argument("--sigma-min", type=float, default=None,
-                   help="Sigma min. Overrides default.")
-    p.add_argument("--sigma-max", type=float, default=None,
-                   help="Sigma max. Overrides default.")
-    p.add_argument("--n-sample-per-cond", type=int, default=1,
-                   help="Number of samples per condition entry. Default: 1")
-    p.add_argument("--batch-size", type=int, default=10,
-                   help="Max items per inference batch per GPU. Default: 10")
-    p.add_argument("--seed", type=int, default=-1,
-                   help="RNG seed. -1 uses a random seed. Default: -1")
+    p.add_argument(
+        "--sample-steps",
+        type=int,
+        default=None,
+        help="Diffusion steps. Overrides registry/config default.",
+    )
+    p.add_argument(
+        "--cfg-scale",
+        type=float,
+        default=None,
+        help="Classifier-free guidance scale. Overrides default.",
+    )
+    p.add_argument(
+        "--sampler-type",
+        type=str,
+        default=None,
+        help="Sampler type. Overrides default.",
+    )
+    p.add_argument(
+        "--sigma-min", type=float, default=None, help="Sigma min. Overrides default."
+    )
+    p.add_argument(
+        "--sigma-max", type=float, default=None, help="Sigma max. Overrides default."
+    )
+    p.add_argument(
+        "--n-sample-per-cond",
+        type=int,
+        default=1,
+        help="Number of samples per condition entry. Default: 1",
+    )
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Max items per inference batch per GPU. Default: 10",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=-1,
+        help="RNG seed. -1 uses a random seed. Default: -1",
+    )
 
     # ---- Device ----
     p.add_argument(
@@ -173,11 +220,16 @@ def build_parser() -> argparse.ArgumentParser:
 # Condition loading helpers
 # ---------------------------------------------------------------------------
 
-def _flatten_dict(d: dict, parent_key: str = "", sep: str = "/", depth: int = 0) -> dict:
+
+def _flatten_dict(
+    d: dict, parent_key: str = "", sep: str = "/", depth: int = 0
+) -> dict:
     items: dict = {}
     for k, v in d.items():
         if depth == 0:
-            assert isinstance(v, dict) and all(isinstance(v_, dict) for v_ in v.values())
+            assert isinstance(v, dict) and all(
+                isinstance(v_, dict) for v_ in v.values()
+            )
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
         if isinstance(list(v.values())[0], dict):
             items.update(_flatten_dict(v, new_key, sep=sep, depth=depth + 1))
@@ -211,8 +263,10 @@ def _load_conditions(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
 # Audio saving
 # ---------------------------------------------------------------------------
 
+
 def _save_audio(audio: torch.Tensor, path: str, sample_rate: int, fmt: str) -> None:
     from anvil_audio.utils.audio_utils import save_audio
+
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     save_audio(path, audio, sample_rate, fmt=fmt)
 
@@ -220,6 +274,7 @@ def _save_audio(audio: torch.Tensor, path: str, sample_rate: int, fmt: str) -> N
 # ---------------------------------------------------------------------------
 # Pipeline loader (handles both registry and legacy paths)
 # ---------------------------------------------------------------------------
+
 
 def _load_pipeline(args: argparse.Namespace, device: torch.device) -> DiffusionPipeline:
     if args.model:
@@ -234,6 +289,7 @@ def _load_pipeline(args: argparse.Namespace, device: torch.device) -> DiffusionP
         raise SystemExit("error: --ckpt-path is required when using --model-config.")
 
     from anvil_audio.models.factory import create_pipeline_from_config
+
     with open(args.model_config) as fh:
         model_config = json.load(fh)
 
@@ -249,6 +305,7 @@ def _load_pipeline(args: argparse.Namespace, device: torch.device) -> DiffusionP
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = build_parser()
@@ -304,17 +361,28 @@ def main() -> None:
 
     # Resolve seed and effective generation params for sidecar metadata
     effective_seed = (
-        args.seed if args.seed != -1
+        args.seed
+        if args.seed != -1
         else int(np.random.randint(0, 2**32 - 1, dtype=np.uint32))
     )
-    effective_steps = steps if steps is not None else pipeline.default_params.get("steps", 100)
+    effective_steps = (
+        steps if steps is not None else pipeline.default_params.get("steps", 100)
+    )
     model_name = args.model or "custom"
     gen_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     _output_mgr = OutputManager(base_dir=args.output_dir)
-    effective_cfg = gen_kwargs.get("cfg_scale", pipeline.default_params.get("cfg_scale", 7.0))
-    effective_sampler = gen_kwargs.get("sampler_type", pipeline.default_params.get("sampler_type", "dpmpp-3m-sde"))
-    effective_sigma_min = gen_kwargs.get("sigma_min", pipeline.default_params.get("sigma_min", 0.3))
-    effective_sigma_max = gen_kwargs.get("sigma_max", pipeline.default_params.get("sigma_max", 500.0))
+    effective_cfg = gen_kwargs.get(
+        "cfg_scale", pipeline.default_params.get("cfg_scale", 7.0)
+    )
+    effective_sampler = gen_kwargs.get(
+        "sampler_type", pipeline.default_params.get("sampler_type", "dpmpp-3m-sde")
+    )
+    effective_sigma_min = gen_kwargs.get(
+        "sigma_min", pipeline.default_params.get("sigma_min", 0.3)
+    )
+    effective_sigma_max = gen_kwargs.get(
+        "sigma_max", pipeline.default_params.get("sigma_max", 500.0)
+    )
     is_acestep = False
     if args.model:
         _entry = registry.get_model(args.model)
@@ -333,6 +401,31 @@ def main() -> None:
 
     # Load conditions and expand by n_sample_per_cond
     conds = _load_conditions(args)
+    if args.enhance_prompt or args.write_lyrics:
+        from anvil_audio.intelligence import LocalLLM, enhance_prompt, write_lyrics
+
+        llm = LocalLLM(args.intelligence_model)
+        mode = "music" if is_acestep else "audio"
+        for cond in conds.values():
+            original_prompt = str(cond.get("prompt", ""))
+            duration = float(cond.get("seconds_total", args.seconds_total))
+            if args.enhance_prompt:
+                package = enhance_prompt(
+                    original_prompt,
+                    mode=mode,
+                    duration_seconds=duration,
+                    negative_prompt=str(cond.get("negative_prompt", "")),
+                    llm=llm,
+                )
+                cond["prompt"] = package.prompt
+                cond["negative_prompt"] = package.negative_prompt
+                cond["original_prompt"] = original_prompt
+            if args.write_lyrics and is_acestep and not cond.get("lyrics"):
+                cond["lyrics"] = write_lyrics(
+                    str(cond.get("prompt", original_prompt)),
+                    duration_seconds=duration,
+                    llm=llm,
+                )
     path_full: list[str] = []
     conds_full: list[dict[str, Any]] = []
     for p, cond in conds.items():
@@ -376,7 +469,9 @@ def main() -> None:
         print(f"\tSampler:\t{effective_params.get('sampler_type', 'dpmpp-3m-sde')}")
         print(f"\tSeed:\t\t{args.seed}")
         print(f"\tFormat:\t\t{args.format}")
-        print(f"\tTotal items:\t{len(path_full)} ({len(conds)} prompts × {args.n_sample_per_cond})")
+        print(
+            f"\tTotal items:\t{len(path_full)} ({len(conds)} prompts × {args.n_sample_per_cond})"
+        )
         print()
 
     # Distribute across ranks
@@ -386,8 +481,8 @@ def main() -> None:
     # Generation loop
     n_iter = math.ceil(len(conds_rank) / batch_window)
     for i in range(n_iter):
-        path_i = path_rank[i * batch_window: (i + 1) * batch_window]
-        conds_i = conds_rank[i * batch_window: (i + 1) * batch_window]
+        path_i = path_rank[i * batch_window : (i + 1) * batch_window]
+        conds_i = conds_rank[i * batch_window : (i + 1) * batch_window]
         batch_kwargs = dict(gen_kwargs)
         if not is_acestep:
             if any(cond.get("negative_prompt") for cond in conds_i):
@@ -431,6 +526,11 @@ def main() -> None:
                 negative_prompt=conds_i[j].get("negative_prompt", ""),
                 seconds_start=float(conds_i[j].get("seconds_start", 0.0)),
                 seconds_total=float(conds_i[j].get("seconds_total", 0.0)),
+                extra={
+                    key: conds_i[j][key]
+                    for key in ("lyrics", "original_prompt")
+                    if conds_i[j].get(key)
+                },
             )
             _output_mgr.write_sidecar(Path(save_path), meta)
 

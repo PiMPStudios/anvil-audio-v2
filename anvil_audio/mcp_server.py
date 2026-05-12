@@ -21,6 +21,7 @@ import sys
 # Suppress upstream deprecation noise before heavy imports.
 try:
     from anvil_audio._warning_filters import apply_filters
+
     apply_filters()
 except ImportError:
     pass
@@ -36,7 +37,6 @@ from mcp.server.fastmcp import FastMCP
 
 from anvil_audio.core.registry import registry
 from anvil_audio.core.output import GenerationMetadata, OutputManager
-from anvil_audio.utils.audio_utils import float_to_int16_audio
 from anvil_audio.utils.stdio_guard import stdout_to_stderr
 
 
@@ -69,17 +69,40 @@ _pipeline_cache: dict[str, Any] = {}
 _active_project: str = ""
 
 # Keywords that suggest music-style prompts (prefer ACE-Step when available).
-_MUSIC_KEYWORDS = frozenset({
-    "music", "song", "track", "melody", "beat", "bpm", "chord",
-    "lyrics", "verse", "chorus", "bridge", "instrumental",
-    "genre", "pop", "rock", "jazz", "electronic", "hip hop",
-    "acoustic", "guitar", "piano", "drums", "synth", "bass line",
-})
+_MUSIC_KEYWORDS = frozenset(
+    {
+        "music",
+        "song",
+        "track",
+        "melody",
+        "beat",
+        "bpm",
+        "chord",
+        "lyrics",
+        "verse",
+        "chorus",
+        "bridge",
+        "instrumental",
+        "genre",
+        "pop",
+        "rock",
+        "jazz",
+        "electronic",
+        "hip hop",
+        "acoustic",
+        "guitar",
+        "piano",
+        "drums",
+        "synth",
+        "bass line",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _log(msg: str) -> None:
     """Write a status message to stderr (stdout is reserved for MCP protocol)."""
@@ -95,7 +118,9 @@ def _auto_select_model(prompt: str) -> str:
     """Pick the best available model for *prompt* based on simple heuristics."""
     models = registry.list_models()
     if not models:
-        raise RuntimeError("No models are registered. Add one to ~/.anvil-audio/registry.yaml.")
+        raise RuntimeError(
+            "No models are registered. Add one to ~/.anvil-audio/registry.yaml."
+        )
 
     if _is_music_prompt(prompt):
         for e in models:
@@ -114,6 +139,7 @@ def _get_pipeline(model_name: str) -> Any:
     if model_name not in _pipeline_cache:
         _log(f"Loading model: {model_name}")
         from anvil_audio.core.registry import load_pipeline
+
         # load_pipeline triggers model weight downloads and prints progress
         # messages (HF hub, tqdm, "Loading VAE...", etc.) to stdout.
         # Redirect to stderr — stdout is reserved for JSON-RPC.
@@ -141,6 +167,7 @@ def _resolve_project(project: str) -> str:
 def _load_audio_file(file_path: str) -> tuple[int, np.ndarray]:
     """Load an audio file from disk and return (sample_rate, int16_ndarray)."""
     import soundfile as sf
+
     data, sr = sf.read(file_path, dtype="int16", always_2d=False)
     return sr, data
 
@@ -148,11 +175,12 @@ def _load_audio_file(file_path: str) -> tuple[int, np.ndarray]:
 def _int16_to_float_tensor(arr: np.ndarray) -> Any:
     """Convert (N,)/(N,C) int16 ndarray → (C,N) float32 torch.Tensor in [-1, 1]."""
     import torch
+
     float_arr = arr.astype(np.float32) / 32768.0
     if float_arr.ndim == 1:
-        float_arr = float_arr[np.newaxis, :]   # mono → (1, N)
+        float_arr = float_arr[np.newaxis, :]  # mono → (1, N)
     else:
-        float_arr = float_arr.T                # (N, C) → (C, N)
+        float_arr = float_arr.T  # (N, C) → (C, N)
     return torch.from_numpy(float_arr)
 
 
@@ -169,7 +197,7 @@ def _run_generate(
     negative_prompt: str = "",
 ) -> dict[str, Any]:
     """Core generation logic shared by generate_audio and batch_generate."""
-    import torch, numpy as np
+    import numpy as np
 
     pipeline = _get_pipeline(model_name)
     entry = registry.get_model(model_name)
@@ -178,7 +206,8 @@ def _run_generate(
     effective_steps = steps if steps is not None else params.get("steps", 100)
     effective_cfg = cfg_scale if cfg_scale is not None else params.get("cfg_scale", 7.0)
     effective_seed = (
-        int(seed) if int(seed) != -1
+        int(seed)
+        if int(seed) != -1
         else int(np.random.randint(0, 2**32 - 1, dtype=np.uint32))
     )
 
@@ -193,14 +222,18 @@ def _run_generate(
             }
         ]
     else:
-        conditioning = [{"prompt": prompt, "seconds_start": 0.0, "seconds_total": duration}]
+        conditioning = [
+            {"prompt": prompt, "seconds_start": 0.0, "seconds_total": duration}
+        ]
 
     gen_kwargs: dict[str, Any] = {"cfg_scale": effective_cfg}
     if not is_acestep:
         sampler = params.get("sampler_type", "dpmpp-3m-sde")
         sigma_min = params.get("sigma_min", 0.03)
         sigma_max = params.get("sigma_max", 500.0)
-        gen_kwargs.update(sampler_type=sampler, sigma_min=sigma_min, sigma_max=sigma_max)
+        gen_kwargs.update(
+            sampler_type=sampler, sigma_min=sigma_min, sigma_max=sigma_max
+        )
         if negative_prompt:
             gen_kwargs["negative_conditioning"] = [
                 {
@@ -238,7 +271,9 @@ def _run_generate(
         seed=effective_seed,
         steps=effective_steps,
         cfg_scale=float(effective_cfg),
-        sampler_type=params.get("sampler_type", "ode" if is_acestep else "dpmpp-3m-sde"),
+        sampler_type=params.get(
+            "sampler_type", "ode" if is_acestep else "dpmpp-3m-sde"
+        ),
         sigma_min=float(params.get("sigma_min", 0.0)),
         sigma_max=float(params.get("sigma_max", 0.0)),
         duration_seconds=audio.shape[-1] / sr,
@@ -262,6 +297,44 @@ def _run_generate(
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def prepare_music_prompt(
+    prompt: str,
+    duration_seconds: float = 60.0,
+    negative_prompt: str = "",
+    write_lyrics: bool = True,
+    enhance: bool = True,
+) -> dict[str, Any]:
+    """Enhance a music prompt, suggest negatives, and optionally write lyrics.
+
+    Uses the local MLX Llama model when available. The first run may download
+    the default local LLM if it is not already present.
+
+    Args:
+        prompt: Base music prompt.
+        duration_seconds: Target track length used for lyric density.
+        negative_prompt: Existing negative prompt to preserve or improve.
+        write_lyrics: Whether to write duration-aware lyrics.
+        enhance: Whether to rewrite the prompt before lyric writing.
+
+    Returns:
+        dict with prompt, negative_prompt, lyrics, and raw LLM output.
+    """
+    try:
+        from anvil_audio.intelligence import prepare_song_prompt
+
+        return prepare_song_prompt(
+            prompt,
+            duration_seconds=duration_seconds,
+            negative_prompt=negative_prompt,
+            write_vocals=write_lyrics,
+            enhance=enhance,
+        ).to_dict()
+    except Exception as exc:
+        return {"error": str(exc)}
+
 
 @mcp.tool()
 def generate_audio(
@@ -464,17 +537,35 @@ def edit_audio(
 
         result = process_audio_chain(
             audio_input,
-            trim_silence, trim_top_db,
-            loop_enabled, loop_start, loop_end if loop_enabled else 30.0,
-            time_stretch, pitch_shift,
-            eq_enabled, eq_low_db, eq_low_freq, eq_mid_db, eq_mid_freq, eq_high_db, eq_high_freq,
-            reverb_enabled, reverb_size, reverb_damping, reverb_mix,
-            fade_in, fade_out,
-            normalize, normalize_target_db, normalize_lufs,
+            trim_silence,
+            trim_top_db,
+            loop_enabled,
+            loop_start,
+            loop_end if loop_enabled else 30.0,
+            time_stretch,
+            pitch_shift,
+            eq_enabled,
+            eq_low_db,
+            eq_low_freq,
+            eq_mid_db,
+            eq_mid_freq,
+            eq_high_db,
+            eq_high_freq,
+            reverb_enabled,
+            reverb_size,
+            reverb_damping,
+            reverb_mix,
+            fade_in,
+            fade_out,
+            normalize,
+            normalize_target_db,
+            normalize_lufs,
         )
 
         if result is None:
-            return {"error": "Processing chain returned no audio — check that the file exists and is a valid audio file."}
+            return {
+                "error": "Processing chain returned no audio — check that the file exists and is a valid audio file."
+            }
 
         out_sr, out_arr = result
         tensor = _int16_to_float_tensor(out_arr)
@@ -495,19 +586,29 @@ def edit_audio(
                 "mid": {"gain_db": eq_mid_db, "freq": eq_mid_freq},
                 "high": {"gain_db": eq_high_db, "freq": eq_high_freq},
             },
-            "reverb": {"enabled": reverb_enabled, "room_size": reverb_size,
-                       "damping": reverb_damping, "wet_dry": reverb_mix},
+            "reverb": {
+                "enabled": reverb_enabled,
+                "room_size": reverb_size,
+                "damping": reverb_damping,
+                "wet_dry": reverb_mix,
+            },
             "fade": {"in_s": fade_in, "out_s": fade_out},
-            "normalize": {"enabled": normalize, "target_db": normalize_target_db,
-                          "mode": "lufs" if normalize_lufs else "peak"},
+            "normalize": {
+                "enabled": normalize,
+                "target_db": normalize_target_db,
+                "mode": "lufs" if normalize_lufs else "peak",
+            },
         }
 
         meta = GenerationMetadata(
             prompt="(edit)",
             model_name="edit",
-            seed=-1, steps=0, cfg_scale=1.0,
+            seed=-1,
+            steps=0,
+            cfg_scale=1.0,
             sampler_type="edit",
-            sigma_min=0.0, sigma_max=0.0,
+            sigma_min=0.0,
+            sigma_max=0.0,
             duration_seconds=tensor.shape[-1] / out_sr,
             timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
             extra={
@@ -544,19 +645,25 @@ def list_models() -> list[dict[str, Any]]:
     for entry in registry.list_models():
         features: list[str] = []
         if entry.pipeline_type == "acestep":
-            features.extend(["lyrics", "negative-prompt", "music-generation", "style-tags"])
+            features.extend(
+                ["lyrics", "negative-prompt", "music-generation", "style-tags"]
+            )
         else:
-            features.extend(["negative-prompt", "sound-effects", "ambient-audio", "init-audio"])
+            features.extend(
+                ["negative-prompt", "sound-effects", "ambient-audio", "init-audio"]
+            )
 
-        result.append({
-            "name": entry.name,
-            "pipeline_type": entry.pipeline_type,
-            "max_duration": entry.max_duration,
-            "default_params": entry.resolved_params(),
-            "is_loaded": entry.name in loaded,
-            "supported_features": features,
-            "pretrained_name": entry.pretrained_name,
-        })
+        result.append(
+            {
+                "name": entry.name,
+                "pipeline_type": entry.pipeline_type,
+                "max_duration": entry.max_duration,
+                "default_params": entry.resolved_params(),
+                "is_loaded": entry.name in loaded,
+                "supported_features": features,
+                "pretrained_name": entry.pretrained_name,
+            }
+        )
     return result
 
 
@@ -584,7 +691,15 @@ def get_model_info(model: str) -> dict[str, Any]:
     if entry.pipeline_type == "acestep":
         features.extend(["lyrics", "negative-prompt", "music-generation", "style-tags"])
     else:
-        features.extend(["negative-prompt", "sound-effects", "ambient-audio", "inpainting", "init-audio"])
+        features.extend(
+            [
+                "negative-prompt",
+                "sound-effects",
+                "ambient-audio",
+                "inpainting",
+                "init-audio",
+            ]
+        )
 
     source: dict[str, Any] = {}
     if entry.pretrained_name:
@@ -631,7 +746,11 @@ def list_recent_outputs(
     if project:
         roots = [base / project.strip()]
     else:
-        roots = sorted(base.iterdir(), key=lambda d: d.stat().st_mtime, reverse=True) if base.exists() else []
+        roots = (
+            sorted(base.iterdir(), key=lambda d: d.stat().st_mtime, reverse=True)
+            if base.exists()
+            else []
+        )
 
     files: list[Path] = []
     for root in roots:
@@ -652,12 +771,14 @@ def list_recent_outputs(
                 meta = json.loads(sidecar.read_text())
             except Exception:
                 pass
-        results.append({
-            "path": str(f),
-            "project": f.parent.name if f.parent != base else "default",
-            "modified_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-            "metadata": meta,
-        })
+        results.append(
+            {
+                "path": str(f),
+                "project": f.parent.name if f.parent != base else "default",
+                "modified_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                "metadata": meta,
+            }
+        )
     return results
 
 
@@ -701,14 +822,21 @@ def list_projects() -> list[dict[str, Any]]:
     for d in base.iterdir():
         if not d.is_dir():
             continue
-        audio_files = list(d.rglob("*.wav")) + list(d.rglob("*.flac")) + list(d.rglob("*.mp3")) + list(d.rglob("*.ogg"))
+        audio_files = (
+            list(d.rglob("*.wav"))
+            + list(d.rglob("*.flac"))
+            + list(d.rglob("*.mp3"))
+            + list(d.rglob("*.ogg"))
+        )
         mtime = d.stat().st_mtime
-        projects.append({
-            "name": d.name,
-            "path": str(d),
-            "audio_file_count": len(audio_files),
-            "last_modified": datetime.fromtimestamp(mtime).isoformat(),
-        })
+        projects.append(
+            {
+                "name": d.name,
+                "path": str(d),
+                "audio_file_count": len(audio_files),
+                "last_modified": datetime.fromtimestamp(mtime).isoformat(),
+            }
+        )
 
     projects.sort(key=lambda p: p["last_modified"], reverse=True)
     return projects

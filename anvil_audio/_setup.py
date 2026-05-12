@@ -43,15 +43,26 @@ def check_mlx_installed() -> bool:
         return False
 
 
+def check_mlx_lm_installed() -> bool:
+    """Return True if ``mlx_lm`` is importable."""
+    try:
+        __import__("mlx_lm")
+        return True
+    except ImportError:
+        return False
+
+
 def print_environment_report() -> None:
     """Print a human-readable summary of the current environment."""
     plat = detect_platform()
     acestep_ok = check_acestep_installed()
     mlx_ok = check_mlx_installed()
+    mlx_lm_ok = check_mlx_lm_installed()
 
     print(f"Platform:           {plat}")
     print(f"ACE-Step:           {'installed' if acestep_ok else 'NOT installed'}")
     print(f"MLX (Stable Audio): {'installed' if mlx_ok else 'NOT installed'}")
+    print(f"MLX-LM intelligence: {'installed' if mlx_lm_ok else 'NOT installed'}")
 
     if not acestep_ok:
         print("\nTo install ACE-Step:")
@@ -60,3 +71,6 @@ def print_environment_report() -> None:
     if not mlx_ok and plat == "macos-arm":
         print("\nTo enable MLX acceleration:")
         print("  pip install mlx-audiogen")
+    if not mlx_lm_ok and plat == "macos-arm":
+        print("\nTo enable local prompt enhancement and lyric writing:")
+        print("  pip install mlx-lm")

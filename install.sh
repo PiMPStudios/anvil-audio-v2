@@ -61,8 +61,8 @@ $PIP install pytest --quiet
 
 # ── MLX acceleration (Apple Silicon only) ────────────────────────────────────
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
-    echo "Installing MLX acceleration (mlx-audiogen)..."
-    $PIP install mlx-audiogen --quiet
+    echo "Installing MLX acceleration and local intelligence tooling..."
+    $PIP install mlx-audiogen mlx-lm --quiet
 fi
 
 # ── ACE-Step (optional music generation) ─────────────────────────────────────
