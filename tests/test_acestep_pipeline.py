@@ -16,7 +16,7 @@ def test_import_error_without_project_root_gives_clear_message(monkeypatch):
     real_import = builtins.__import__
 
     def mock_import(name, *args, **kwargs):
-        if name == "acestep.pipeline_ace_step":
+        if name == "acestep.handler":
             raise ImportError("No module named 'acestep'")
         return real_import(name, *args, **kwargs)
 
@@ -24,7 +24,7 @@ def test_import_error_without_project_root_gives_clear_message(monkeypatch):
 
     from anvil_audio.pipelines.acestep import ACEStepPipeline
 
-    with pytest.raises(ImportError, match="pip install 'anvil-audio\\[acestep\\]'"):
+    with pytest.raises(ImportError, match="pip install anvil-audio\\[acestep\\]"):
         ACEStepPipeline(project_root=None)
 
 
@@ -35,7 +35,7 @@ def test_project_root_none_skips_sys_path_injection(monkeypatch):
     real_import = builtins.__import__
 
     def mock_import(name, *args, **kwargs):
-        if name == "acestep.pipeline_ace_step":
+        if name == "acestep.handler":
             raise ImportError("No module named 'acestep'")
         return real_import(name, *args, **kwargs)
 

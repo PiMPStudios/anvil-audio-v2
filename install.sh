@@ -72,7 +72,7 @@ else
         if [[ "$OS" == "Linux" ]]; then
             echo "Installing nano-vllm (required on Linux)..."
             $PIP install \
-                "git+https://github.com/ace-step/ACE-Step.git#subdirectory=acestep/third_parts/nano-vllm" \
+                "git+https://github.com/PiMPStudios/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm" \
                 --quiet
             if [[ $? -ne 0 ]]; then
                 echo "WARNING: nano-vllm install failed — ACE-Step may not work correctly."
@@ -81,7 +81,7 @@ else
 
         echo "Installing ACE-Step..."
         $PIP install \
-            "ace-step @ git+https://github.com/ace-step/ACE-Step.git" \
+            "ace-step @ git+https://github.com/PiMPStudios/ACE-Step-1.5.git" \
             --quiet
         if [[ $? -eq 0 ]]; then
             echo "ACE-Step installed."
