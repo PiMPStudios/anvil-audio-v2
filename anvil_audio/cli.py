@@ -49,6 +49,10 @@ def main() -> None:
         from anvil_audio._cli_generate import main as gen_main
 
         gen_main()
+    elif sub == "dataset":
+        from anvil_audio._cli_dataset import main as dataset_main
+
+        dataset_main()
     elif sub == "enhance-prompt":
         from anvil_audio._cli_intelligence import main as intelligence_main
 
@@ -115,6 +119,7 @@ def _print_help() -> None:
         "\n"
         "Subcommands:\n"
         "  generate    Generate audio from a model and prompt\n"
+        "  dataset     Build local or YouTube audio datasets for LoRA training\n"
         "  enhance-prompt  Enhance a prompt and optionally write lyrics\n"
         "  setup       Check environment and optionally pre-download model weights\n"
         "\n"

@@ -59,6 +59,10 @@ $PIP install -e . --quiet
 echo "Installing test tooling (pytest)..."
 $PIP install pytest --quiet
 
+# ── Dataset tooling ───────────────────────────────────────────────────────────
+echo "Installing dataset tooling (yt-dlp)..."
+$PIP install yt-dlp --quiet
+
 # ── MLX acceleration (Apple Silicon only) ────────────────────────────────────
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo "Installing MLX acceleration and local intelligence tooling..."

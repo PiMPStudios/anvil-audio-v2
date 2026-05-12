@@ -28,6 +28,9 @@ registry, CLI, and Gradio UI.
 - **Local prompt intelligence** — optional MLX Llama prompt enhancement,
   negative-prompt suggestions, and duration-aware lyric writing on Apple
   Silicon.
+- **Automated training datasets** — `anvil dataset` can build local or
+  YouTube-sourced clip datasets, write captions, generate
+  `character_sheet.json`, and emit a training-ready `dataset_config.json`.
 - **MCP server** — expose all generation and editing capabilities to Claude and other MCP clients over stdio; models are cached between calls.
 - **Python 3.12 / 3.13** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout.
 
@@ -57,9 +60,10 @@ bash install.sh
 ```
 
 The script detects your platform, installs the right PyTorch build, adds
-`pytest` for local verification, enables MLX acceleration and local prompt
-intelligence on Apple Silicon, and optionally installs ACE-Step for music
-generation — all in one step. No separate repo clones required.
+`pytest` for local verification, installs `yt-dlp` for dataset building,
+enables MLX acceleration and local prompt intelligence on Apple Silicon, and
+optionally installs ACE-Step for music generation — all in one step. No
+separate repo clones required.
 
 ### Windows
 
@@ -80,6 +84,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 pip install .                      # core install
 # Apple Silicon only: MLX acceleration + local intelligence
 pip install mlx-audiogen mlx-lm
+pip install yt-dlp                 # optional: YouTube dataset builder
 pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
 pip install pytest                 # optional: run the local test suite
 ```
@@ -396,6 +401,65 @@ anvil generate --model acestep-v1.5-sft \
 
 In Gradio, use **Enhance Prompt**, **Write Lyrics**, or **Enhance + Lyrics**
 above the generation controls.
+
+---
+
+## Automated Training Datasets
+
+`anvil dataset` prepares reviewable clip datasets for future LoRA training. It
+can split local audio or authorized YouTube sources into fixed-length WAV clips,
+write JSON sidecars with prompts, create `captions.json`, summarize the set into
+`character_sheet.json`, and emit a `dataset_config.json` compatible with the
+existing `audio_dir` training loader.
+
+Use this only with material you own or are authorized to train on.
+
+Build from local audio:
+
+```bash
+anvil dataset build-local ./my-source-audio \
+    --name my_band_style \
+    --clips 80 \
+    --clip-length 35 \
+    --style-hint "anthemic alternative rock, live drums, gritty guitars" \
+    --caption-mode heuristic
+```
+
+Build from a YouTube channel, playlist, or video:
+
+```bash
+anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
+    --name my_channel_style \
+    --tracks 12 \
+    --clips 80 \
+    --clip-length 35 \
+    --style-hint "cinematic alternative rock, emotional male vocal" \
+    --caption-mode llm
+```
+
+`--caption-mode heuristic` is fast and deterministic. `--caption-mode llm` uses
+the same local MLX Llama intelligence model as prompt enhancement to polish each
+caption and the final character sheet. Both modes keep the generated metadata
+editable so bad clips or captions can be removed before training.
+
+Output layout:
+
+```text
+datasets/my_channel_style_YYYYMMDD_HHMMSS/
+  clips/
+    clip_0001.wav
+    clip_0001.json
+  captions.json
+  character_sheet.json
+  dataset_manifest.json
+  dataset_config.json
+  sources/
+```
+
+The per-clip JSON sidecars contain the training `prompt`, source metadata, basic
+audio analysis, tags, negative tags, and confidence. The generated
+`dataset_config.json` can be passed to training code that consumes
+`audio_dir` datasets.
 
 ---
 
@@ -717,6 +781,29 @@ load and prints the explicit install command.
 
 ---
 
+## `anvil dataset` flags
+
+| Command / Flag | Default | Description |
+| --- | --- | --- |
+| `build-local SOURCE_DIR` | - | Build from a folder of audio files |
+| `build-youtube URL` | - | Download authorized YouTube audio with `yt-dlp` |
+| `--name` | `anvil_dataset` | Dataset name in manifests |
+| `--output-dir` | timestamped `./datasets/...` | Output dataset directory |
+| `--clips` | `40` | Maximum clips to write |
+| `--clip-length` | `35` | Clip length in seconds |
+| `--min-clip-length` | `8` | Skip source files shorter than this |
+| `--stride` | clip length | Seconds between clip starts |
+| `--sample-rate` | `48000` | Output sample rate |
+| `--channels` | `2` | Output channel count |
+| `--style-hint` | blank | Style context added to captions |
+| `--caption-mode` | `heuristic` | `heuristic`, `llm`, or `off` |
+| `--llm-model` | default | LLM path/repo for caption cleanup |
+| `--tracks` | unlimited | YouTube-only max source videos/tracks |
+| `--delete-downloads` | off | Delete raw downloads after clips are written |
+| `--quiet-ytdlp` | off | Pass `--quiet` to `yt-dlp` |
+
+---
+
 ## Logging
 
 Training requires a [Weights & Biases](https://wandb.ai) account:
@@ -737,6 +824,10 @@ You need two config files before starting a training run:
 
 - **model config** — defines architecture and training hyperparameters
 - **dataset config** — points to your audio and metadata
+
+`anvil dataset build-local` and `anvil dataset build-youtube` now write a
+starter `dataset_config.json` automatically. Review the clips and captions, then
+use that generated config as the dataset input for training experiments.
 
 See [docs/datasets.md](docs/datasets.md) for dataset config details.
 

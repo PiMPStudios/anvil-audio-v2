@@ -62,6 +62,9 @@ mlx = [
 intelligence = [
     "mlx-lm",
 ]
+dataset = [
+    "yt-dlp>=2024.5.27",
+]
 acestep = [
     "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git",
 ]
@@ -69,6 +72,7 @@ apple = [
     "anvil-audio[mlx]",
     "anvil-audio[acestep]",
     "anvil-audio[intelligence]",
+    "anvil-audio[dataset]",
 ]
 cuda = [
     "anvil-audio[acestep]",

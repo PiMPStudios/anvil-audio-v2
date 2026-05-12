@@ -56,4 +56,21 @@ setup(
         'webdataset>=0.2.48',
         'x-transformers<1.27.0'           # upper-bound required by model code
     ],
+    extras_require={
+        'mlx': ['mlx-audiogen'],
+        'intelligence': ['mlx-lm'],
+        'dataset': ['yt-dlp>=2024.5.27'],
+        'acestep': [
+            'ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git',
+        ],
+        'apple': [
+            'mlx-audiogen',
+            'mlx-lm',
+            'yt-dlp>=2024.5.27',
+            'ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git',
+        ],
+        'cuda': [
+            'ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git',
+        ],
+    },
 )
