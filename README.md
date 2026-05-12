@@ -8,7 +8,7 @@ It turns a single-model inference codebase into a clean, swappable-component pla
 models, conditioners, and compressors are first-class abstractions.
 
 Supports **Stable Audio** diffusion models (Stability AI),
-**[ACE-Step](https://github.com/ace-step/ACE-Step)** music-generation models (ACE Studio /
+**[ACE-Step](https://github.com/ace-step/ACE-Step-1.5)** music-generation models (ACE Studio /
 StepFun), and **MLX-accelerated Stable Audio** models on Apple Silicon — all through a unified
 registry, CLI, and Gradio UI.
 
@@ -18,7 +18,7 @@ registry, CLI, and Gradio UI.
 
 - **Pluggable pipeline architecture** — `BasePipeline`, `BaseGenerator`, `BaseCompressor`, `BaseConditioner` ABCs; swap any component without touching the rest of your workflow.
 - **Named model registry** — `anvil generate --model stable-audio-open-1.0 --prompt "..."` loads the right pipeline automatically; add your own entries in `~/.anvil-audio/registry.yaml`.
-- **ACE-Step support** — optional integration with [ACE-Step v1.5](https://github.com/ace-step/ACE-Step) for full-song music generation with lyrics and style tags.
+- **ACE-Step support** — optional integration with [ACE-Step v1.5](https://github.com/ace-step/ACE-Step-1.5) for full-song music generation with lyrics and style tags. Installed automatically by `install.sh` — no manual repo clone required.
 - **MLX acceleration** — Apple Silicon users can install `mlx-audiogen` to get native Metal GPU inference for Stable Audio models (~2x faster than PyTorch MPS); weights are auto-converted and cached on first use.
 - **Output management** — collision-free timestamped filenames, JSON metadata sidecars with `generation_duration_seconds`, batch manifests, and project-scoped folders under `~/anvil-audio-outputs/`.
 - **MPS / CUDA / CPU auto-detection** — runs on Apple Silicon, NVIDIA GPUs, or CPU with no flags needed.
@@ -26,36 +26,41 @@ registry, CLI, and Gradio UI.
 - **Gradio web UI** — project name, seed input, live metadata panel, model dropdown with hot-reload, device field.
 - **Built-in audio editor** — post-processing tab with normalize, trim, fade, time stretch, pitch shift, EQ, and reverb; non-destructive exports with full effects sidecar.
 - **MCP server** — expose all generation and editing capabilities to Claude and other MCP clients over stdio; models are cached between calls.
-- **Python 3.12+** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout.
+- **Python 3.12 / 3.13** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout. (ACE-Step requires Python 3.12; Stable Audio and MLX work on both.)
 
 ---
 
 ## Requirements
 
-- Python **3.12 or 3.13** (strongly recommended — Python 3.14 is too new for several ML dependencies and will cause build failures)
+- **Python 3.12** — required for ACE-Step music generation
+- **Python 3.12 or 3.13** — sufficient for Stable Audio and MLX models only
+- Python 3.14+ is too new for several ML dependencies and will cause build failures
 - PyTorch 2.0 or later
 
 ---
 
 ## Install
 
-> **Python 3.12 or 3.13 is required.** Check with `python3 --version`.
-> Install via `brew install python@3.13` (macOS) or from [python.org](https://python.org) (Windows).
+> **Python 3.12 is recommended** — required for ACE-Step. Python 3.13 works for Stable Audio / MLX only.
+> Install via `brew install python@3.12` (macOS) or from [python.org](https://python.org) (Windows).
 
 ### macOS / Linux
 
 ```bash
-git clone -b worktree-feature+self-contained-install https://github.com/PiMPStudios/anvil-audio.git
+git clone https://github.com/PiMPStudios/anvil-audio.git
 cd anvil-audio
 bash install.sh
 ```
 
-The script detects your platform, creates a virtual environment, installs the right PyTorch build, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step.
+The script detects your platform, creates a virtual environment, installs the right PyTorch build, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step. No separate repo clones required.
+
+> If your default `python3` is 3.14+, pass the version explicitly:
+> `PYTHON=python3.12 bash install.sh`
 
 ### Windows
 
 ```powershell
-git clone -b worktree-feature+self-contained-install https://github.com/PiMPStudios/anvil-audio.git
+git clone https://github.com/PiMPStudios/anvil-audio.git
 cd anvil-audio
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
@@ -63,12 +68,12 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ### Manual install (advanced)
 
 ```bash
-python3.13 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python3.12 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 
 pip install .                      # core install
 pip install mlx-audiogen           # Apple Silicon only: MLX acceleration
-pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
+pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation (Python 3.12 only)
 ```
 
 ### Verify your setup
@@ -145,9 +150,9 @@ Every generation saves a JSON sidecar alongside the audio containing the full pa
 
 ## ACE-Step Music Generation (optional)
 
-[ACE-Step](https://github.com/ace-step/ACE-Step) is an open-source full-song music generation
+[ACE-Step v1.5](https://github.com/ace-step/ACE-Step-1.5) is an open-source full-song music generation
 model that supports style tags and full lyric input. Anvil integrates it through the same
-registry and UI as Stable Audio — no separate server or app required.
+registry and UI as Stable Audio — no separate server or app required, and no manual repo clone needed.
 
 ACE-Step is **optional**. If you don't install it, all other Anvil functionality works as normal.
 
@@ -165,8 +170,7 @@ entry. The built-in entries default to:
 | `acestep-v1.5-turbo` | `acestep-5Hz-lm-1.7B` (lighter, faster) |
 | `acestep-v1.5-sft` | `acestep-5Hz-lm-4B` (heavier, better quality) |
 
-Both checkpoints are relative paths within `<ACESTEP_PROJECT_ROOT>/checkpoints/` and are
-downloaded automatically from HuggingFace on first use.
+Both checkpoints are downloaded automatically from HuggingFace on first use.
 
 You can override the LM checkpoint for a specific registry entry via `lm_model_path` in
 `registry.yaml` (see [ACE-Step models](#ace-step-models-1) below), or set a global fallback
@@ -419,7 +423,6 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`
 }
 ```
 
-> If you installed ACE-Step via the legacy `git clone` method, also add `"ACESTEP_PROJECT_ROOT": "/path/to/ACE-Step"` to an `"env"` block.
 
 Replace `/path/to/anvil-audio` with the absolute path to your clone.
 
@@ -439,7 +442,6 @@ Add to `~/.claude.json` under `mcpServers`:
 }
 ```
 
-> If you installed ACE-Step via the legacy `git clone` method, also add `"ACESTEP_PROJECT_ROOT": "/path/to/ACE-Step"` to an `"env"` block.
 
 ### Example session
 
@@ -500,10 +502,8 @@ with the same name as a built-in will override it.
 ```yaml
 - name: my-acestep-finetune
   pipeline_type: acestep
-  acestep_project_root: /path/to/ACE-Step    # path to the cloned repo
   model_config_path: acestep-v15-turbo        # checkpoint variant name
   # Optional: override the LM lyric-planner checkpoint.
-  # Relative paths are resolved under <acestep_project_root>/checkpoints/.
   # Omit to use the built-in default (1.7B for turbo, 4B for sft).
   lm_model_path: acestep-5Hz-lm-1.7B
   default_params:
@@ -511,6 +511,8 @@ with the same name as a built-in will override it.
     cfg_scale: 4.0
     audio_duration: 60
 ```
+
+> If you have a local ACE-Step checkout (e.g. a fine-tune), add `acestep_project_root: /path/to/ACE-Step-1.5` to point Anvil at it instead of the pip-installed package.
 
 ---
 
