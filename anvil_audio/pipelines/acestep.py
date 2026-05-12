@@ -148,13 +148,16 @@ class ACEStepPipeline(BasePipeline):
             "sigma_max": 0.0,
         }
 
+        # When pip-installed (no project_root) and ACESTEP_PROJECT_ROOT is not
+        # set, default to ~/.cache/anvil-audio/acestep so checkpoints land in a
+        # proper cache directory instead of os.getcwd() (the repo root).
+        if resolved_root is None and "ACESTEP_PROJECT_ROOT" not in os.environ:
+            default_cache = str(Path.home() / ".cache" / "anvil-audio" / "acestep")
+            os.makedirs(default_cache, exist_ok=True)
+            os.environ["ACESTEP_PROJECT_ROOT"] = default_cache
+
         # On macOS, set ACESTEP_LM_BACKEND=mlx unless the user has already
-        # set it.  The env var enables the MLX LM lyric-planner backend (2-3x
-        # faster than PyTorch on Apple Silicon) for any ACE-Step code paths
-        # that read it (API server, subprocesses, future handler versions).
-        # Note: the DiT and VAE already use native MLX on Apple Silicon via
-        # AceStepHandler's initialize_service(use_mlx_dit=True) default; this
-        # env var covers the separate 5Hz LM planner component.
+        # set it.
         if sys.platform == "darwin" and "ACESTEP_LM_BACKEND" not in os.environ:
             os.environ["ACESTEP_LM_BACKEND"] = "mlx"
 
