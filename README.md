@@ -32,7 +32,7 @@ registry, CLI, and Gradio UI.
 
 ## Requirements
 
-- **Python 3.12 or 3.13** — recommended
+- **Python 3.13** — recommended (3.12 also supported)
 - Python 3.14+ is too new for several ML dependencies and will cause build failures
 - PyTorch 2.0 or later
 
@@ -40,7 +40,7 @@ registry, CLI, and Gradio UI.
 
 ## Install
 
-> **Python 3.12 or 3.13 is required.** Check with `python3 --version`.
+> **Python 3.13 is recommended.** Check with `python3 --version`.
 > Install via `brew install python@3.13` (macOS) or from [python.org](https://python.org) (Windows).
 
 ### macOS / Linux
@@ -48,26 +48,27 @@ registry, CLI, and Gradio UI.
 ```bash
 git clone https://github.com/PiMPStudios/anvil-audio.git
 cd anvil-audio
+python3.13 -m venv .venv
+source .venv/bin/activate
 bash install.sh
 ```
 
-The script detects your platform, creates a virtual environment, installs the right PyTorch build, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step. No separate repo clones required.
-
-> If your default `python3` is 3.14+, pass the version explicitly:
-> `PYTHON=python3.12 bash install.sh`
+The script detects your platform, installs the right PyTorch build, enables MLX acceleration on Apple Silicon, and optionally installs ACE-Step for music generation — all in one step. No separate repo clones required.
 
 ### Windows
 
 ```powershell
 git clone https://github.com/PiMPStudios/anvil-audio.git
 cd anvil-audio
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 ### Manual install (advanced)
 
 ```bash
-python3.12 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 
 pip install .                      # core install
