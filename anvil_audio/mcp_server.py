@@ -166,6 +166,7 @@ def _run_generate(
     fmt: str,
     project: str,
     lyrics: str,
+    negative_prompt: str = "",
 ) -> dict[str, Any]:
     """Core generation logic shared by generate_audio and batch_generate."""
     import torch, numpy as np
@@ -183,7 +184,14 @@ def _run_generate(
 
     is_acestep = entry is not None and entry.pipeline_type == "acestep"
     if is_acestep:
-        conditioning = [{"prompt": prompt, "lyrics": lyrics or "", "seconds_total": duration}]
+        conditioning = [
+            {
+                "prompt": prompt,
+                "lyrics": lyrics or "",
+                "negative_prompt": negative_prompt or "",
+                "seconds_total": duration,
+            }
+        ]
     else:
         conditioning = [{"prompt": prompt, "seconds_start": 0.0, "seconds_total": duration}]
 
@@ -193,6 +201,14 @@ def _run_generate(
         sigma_min = params.get("sigma_min", 0.03)
         sigma_max = params.get("sigma_max", 500.0)
         gen_kwargs.update(sampler_type=sampler, sigma_min=sigma_min, sigma_max=sigma_max)
+        if negative_prompt:
+            gen_kwargs["negative_conditioning"] = [
+                {
+                    "prompt": negative_prompt,
+                    "seconds_start": 0.0,
+                    "seconds_total": duration,
+                }
+            ]
 
     # Samplers may print progress to stdout; redirect so MCP stdio is clean.
     _gen_t0 = time.perf_counter()
@@ -227,6 +243,7 @@ def _run_generate(
         sigma_max=float(params.get("sigma_max", 0.0)),
         duration_seconds=audio.shape[-1] / sr,
         timestamp=ts,
+        negative_prompt=negative_prompt or "",
         generation_duration_seconds=gen_duration,
         extra=extra,
     )
@@ -250,6 +267,7 @@ def _run_generate(
 def generate_audio(
     prompt: str,
     model: str = "",
+    negative_prompt: str = "",
     duration_seconds: float = 30.0,
     steps: int = 0,
     cfg_scale: float = 0.0,
@@ -272,6 +290,9 @@ def generate_audio(
         prompt: Text description of the audio to generate.
         model: Registry model name (e.g. "stable-audio-open-1.0",
                "acestep-v1.5-turbo"). Leave empty to auto-select.
+        negative_prompt: Text describing sounds or qualities to avoid.
+                         For ACE-Step this controls the LM/thinking path when
+                         enabled.
         duration_seconds: Target length in seconds. Clamped to the model's
                           maximum (47s for Stable Audio, 600s for ACE-Step).
         steps: Diffusion/inference steps. 0 = use the model's default.
@@ -299,6 +320,7 @@ def generate_audio(
             fmt=fmt,
             project=project,
             lyrics=lyrics,
+            negative_prompt=negative_prompt,
         )
     except Exception as exc:
         return {"error": str(exc)}
@@ -313,7 +335,7 @@ def batch_generate(
 
     Each item in the list is a condition dict with the same keys as
     generate_audio: prompt (required), model, duration_seconds, steps,
-    cfg_scale, seed, fmt, lyrics. Items using the same model share the
+    cfg_scale, seed, fmt, lyrics, negative_prompt. Items using the same model share the
     cached pipeline — no reload penalty.
 
     Args:
@@ -348,6 +370,7 @@ def batch_generate(
                 fmt=str(item.get("fmt", "wav")),
                 project=item.get("project", "") or project,
                 lyrics=str(item.get("lyrics", "")),
+                negative_prompt=str(item.get("negative_prompt", "")),
             )
             results.append(result)
         except Exception as exc:
@@ -521,9 +544,9 @@ def list_models() -> list[dict[str, Any]]:
     for entry in registry.list_models():
         features: list[str] = []
         if entry.pipeline_type == "acestep":
-            features.extend(["lyrics", "music-generation", "style-tags"])
+            features.extend(["lyrics", "negative-prompt", "music-generation", "style-tags"])
         else:
-            features.extend(["sound-effects", "ambient-audio", "init-audio"])
+            features.extend(["negative-prompt", "sound-effects", "ambient-audio", "init-audio"])
 
         result.append({
             "name": entry.name,
@@ -559,9 +582,9 @@ def get_model_info(model: str) -> dict[str, Any]:
 
     features: list[str] = []
     if entry.pipeline_type == "acestep":
-        features.extend(["lyrics", "music-generation", "style-tags"])
+        features.extend(["lyrics", "negative-prompt", "music-generation", "style-tags"])
     else:
-        features.extend(["sound-effects", "ambient-audio", "inpainting", "init-audio"])
+        features.extend(["negative-prompt", "sound-effects", "ambient-audio", "inpainting", "init-audio"])
 
     source: dict[str, Any] = {}
     if entry.pretrained_name:

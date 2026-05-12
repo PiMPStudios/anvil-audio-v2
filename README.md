@@ -219,12 +219,62 @@ correction and LM thinking by default. That matches AnvilApp's known-good
 MLX-Swift path for blank-lyrics SFT generation; enable those options explicitly
 only when you want to experiment with ACE-Step's LM/code-hint path.
 
+### Optional XL checkpoints
+
+ACE-Step v1.5 XL DiT checkpoints (`acestep-v15-xl-base`,
+`acestep-v15-xl-sft`, and `acestep-v15-xl-turbo`) are large optional downloads.
+Anvil does **not** register or auto-download them by default. If you add an XL
+entry to `~/.anvil-audio/registry.yaml` and the checkpoint is missing, Anvil
+stops before ACE-Step can start a surprise download.
+
+Install an XL checkpoint explicitly before using it:
+
+```bash
+acestep-download \
+    --dir "$HOME/.cache/anvil-audio/acestep/checkpoints" \
+    --model acestep-v15-xl-turbo
+```
+
+Use one of these model names with `--model`: `acestep-v15-xl-turbo`,
+`acestep-v15-xl-sft`, or `acestep-v15-xl-base`. Avoid `acestep-download --all`
+unless you intentionally want every optional ACE-Step submodel.
+
+Then register the XL model in your user registry:
+
+```yaml
+- name: acestep-v1.5-xl-turbo
+  pipeline_type: acestep
+  model_config_path: acestep-v15-xl-turbo
+  lm_model_path: acestep-5Hz-lm-1.7B
+  max_duration: 600
+  default_params:
+    steps: 8
+    cfg_scale: 1.0
+    audio_duration: 60
+    sampler_type: ode
+    shift: 3.0
+    thinking: true
+    use_cot_metas: true
+    use_cot_caption: false
+    use_cot_language: true
+    dcw_enabled: false
+    velocity_norm_threshold: 0.0
+    velocity_ema_factor: 0.0
+    sigma_min: 0.0
+    sigma_max: 0.0
+    # Optional load-time memory controls for large XL checkpoints:
+    # offload_to_cpu: true
+    # offload_dit_to_cpu: true
+    # quantization: int8_weight_only
+```
+
 ### CLI
 
 ```bash
 # Single prompt (instrumental)
 anvil generate --model acestep-v1.5-turbo \
-    --prompt "indie pop, acoustic guitar, warm vocals, upbeat"
+    --prompt "indie pop, acoustic guitar, warm vocals, upbeat" \
+    --negative-prompt "muddy mix, harsh clipping, distorted vocals"
 
 # Batch generation with lyrics (see example file)
 anvil generate --model acestep-v1.5-turbo \
@@ -232,7 +282,8 @@ anvil generate --model acestep-v1.5-turbo \
     --output-dir ./out
 ```
 
-Batch YAML format — each entry supports `prompt`, `lyrics`, and `seconds_total`:
+Batch YAML format — each entry supports `prompt`, `negative_prompt`, `lyrics`,
+and `seconds_total`:
 
 ```yaml
 tracks:
@@ -248,6 +299,7 @@ tracks:
 
   electronic_instrumental:
     prompt: "electronic, synthwave, driving bass, retro 80s, cinematic"
+    negative_prompt: "muddy low end, harsh treble, clipping"
     lyrics: "[Instrumental]"
     seconds_total: 45.0
 ```
@@ -265,6 +317,11 @@ python run_gradio.py --model acestep-v1.5-sft
 The ACE-Step UI adds a **Lyrics** field below the prompt. Leave it blank or enter
 `[Instrumental]` for tracks with no vocals. Structure lyrics with section markers
 like `[verse]`, `[chorus]`, `[bridge]`.
+
+The **Negative prompt** field is available for every model. For ACE-Step, it is
+passed to ACE-Step's LM/thinking path as `lm_negative_prompt`; direct DiT-only
+SFT generation keeps it in metadata, but upstream ACE-Step does not expose a
+separate DiT negative-prompt control.
 
 ---
 
@@ -531,6 +588,11 @@ with the same name as a built-in will override it.
     dcw_enabled: false
 ```
 
+XL entries use the same schema, but XL checkpoints are intentionally opt-in.
+Install them first with `acestep-download --dir "$HOME/.cache/anvil-audio/acestep/checkpoints" --model <checkpoint>`.
+If an XL checkpoint is missing, Anvil refuses to auto-download it during model
+load and prints the explicit install command.
+
 ---
 
 ## `run_gradio.py` flags
@@ -563,6 +625,7 @@ with the same name as a built-in will override it.
 | `--cond-yaml-path PATH` | — | Batch YAML conditions file |
 | `--seconds-start` | `0.0` | Start time (seconds) |
 | `--seconds-total` | `30.0` | Duration (seconds) |
+| `--negative-prompt` | blank | Text describing sounds or qualities to avoid |
 | `--output-dir` | `./output` | Output directory |
 | `--format` | `wav` | `wav`, `flac`, or `mp3` |
 | `--clip-length` | off | Clip to `seconds_total` |

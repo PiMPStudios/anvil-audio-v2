@@ -113,6 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=30.0,
         help="Total duration in seconds (used with --prompt). Default: 30.0",
     )
+    p.add_argument(
+        "--negative-prompt",
+        type=str,
+        default="",
+        help="Text describing sounds or qualities to avoid. Default: blank.",
+    )
 
     # ---- Output ----
     p.add_argument(
@@ -184,13 +190,14 @@ def _flatten_dict(d: dict, parent_key: str = "", sep: str = "/", depth: int = 0)
 def _load_conditions(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     """Return an ordered dict of {path_key: condition_dict}."""
     if args.prompt:
-        return {
-            "prompt/item": {
-                "prompt": args.prompt,
-                "seconds_start": args.seconds_start,
-                "seconds_total": args.seconds_total,
-            }
+        condition = {
+            "prompt": args.prompt,
+            "seconds_start": args.seconds_start,
+            "seconds_total": args.seconds_total,
         }
+        if args.negative_prompt:
+            condition["negative_prompt"] = args.negative_prompt
+        return {"prompt/item": condition}
     with open(args.cond_yaml_path) as fh:
         raw = yaml.safe_load(fh)
     conds = _flatten_dict(raw)
@@ -308,6 +315,10 @@ def main() -> None:
     effective_sampler = gen_kwargs.get("sampler_type", pipeline.default_params.get("sampler_type", "dpmpp-3m-sde"))
     effective_sigma_min = gen_kwargs.get("sigma_min", pipeline.default_params.get("sigma_min", 0.3))
     effective_sigma_max = gen_kwargs.get("sigma_max", pipeline.default_params.get("sigma_max", 500.0))
+    is_acestep = False
+    if args.model:
+        _entry = registry.get_model(args.model)
+        is_acestep = _entry is not None and _entry.pipeline_type == "acestep"
 
     batch_window = args.batch_size
 
@@ -377,13 +388,25 @@ def main() -> None:
     for i in range(n_iter):
         path_i = path_rank[i * batch_window: (i + 1) * batch_window]
         conds_i = conds_rank[i * batch_window: (i + 1) * batch_window]
+        batch_kwargs = dict(gen_kwargs)
+        if not is_acestep:
+            if any(cond.get("negative_prompt") for cond in conds_i):
+                negative_conditioning = [
+                    {
+                        "prompt": cond.get("negative_prompt", ""),
+                        "seconds_start": cond.get("seconds_start", 0.0),
+                        "seconds_total": cond.get("seconds_total", args.seconds_total),
+                    }
+                    for cond in conds_i
+                ]
+                batch_kwargs["negative_conditioning"] = negative_conditioning
 
         samples = pipeline.generate(
             conditioning=conds_i,
             steps=steps,
             seed=effective_seed,
             disable_tqdm=(rank != 0),
-            **gen_kwargs,
+            **batch_kwargs,
         )
 
         for j in range(samples.shape[0]):

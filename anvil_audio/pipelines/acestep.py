@@ -12,6 +12,7 @@ Anvil conditioning key  →  ACE-Step parameter
 ``prompt``              →  ``captions`` (style / genre tags)
 ``lyrics``              →  ``lyrics`` (vocal content; use ``"[Instrumental]"``
                            or leave blank for instrumental output)
+``negative_prompt``     →  ``lm_negative_prompt`` (ACE-Step LM/thinking control)
 ``seconds_total``       →  ``audio_duration`` (generation length in seconds)
 ``seed``                →  passed as the ``seed`` argument
 ``steps``               →  ``inference_steps``
@@ -63,12 +64,74 @@ from torch import Tensor
 from anvil_audio.core.interfaces import BasePipeline
 from anvil_audio.utils.stdio_guard import stdout_to_stderr
 
+_XL_CHECKPOINT_PREFIX = "acestep-v15-xl-"
+_XL_AUTO_DOWNLOAD_ENV = "ANVIL_ACESTEP_ALLOW_XL_AUTO_DOWNLOAD"
+_CHECKPOINT_WEIGHT_FILENAMES = (
+    "model.safetensors",
+    "model.safetensors.index.json",
+    "pytorch_model.bin",
+    "pytorch_model.bin.index.json",
+    "diffusion_pytorch_model.safetensors",
+    "diffusion_pytorch_model.safetensors.index.json",
+    "diffusion_pytorch_model.bin",
+    "diffusion_pytorch_model.bin.index.json",
+)
+
+
 def _env_bool(name: str, default: bool) -> bool:
     """Parse a bool-ish environment variable."""
     raw = os.environ.get(name)
     if raw is None:
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _acestep_checkpoints_dir(project_root: str) -> Path:
+    """Return the checkpoint directory ACE-Step will use for this load."""
+    env_dir = os.environ.get("ACESTEP_CHECKPOINTS_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return Path(project_root) / "checkpoints"
+
+
+def _is_xl_checkpoint(config_path: str) -> bool:
+    """Return whether config_path names one of ACE-Step's XL DiT variants."""
+    return Path(config_path).name.startswith(_XL_CHECKPOINT_PREFIX)
+
+
+def _checkpoint_has_weights(checkpoint_dir: Path) -> bool:
+    """Return whether a checkpoint directory appears to contain model weights."""
+    if not checkpoint_dir.is_dir():
+        return False
+    return any(
+        (checkpoint_dir / filename).exists()
+        for filename in _CHECKPOINT_WEIGHT_FILENAMES
+    )
+
+
+def _raise_for_missing_xl_checkpoint(project_root: str, config_path: str) -> None:
+    """Block surprise auto-downloads for large optional ACE-Step XL checkpoints."""
+    if not _is_xl_checkpoint(config_path):
+        return
+    if _env_bool(_XL_AUTO_DOWNLOAD_ENV, False):
+        return
+
+    checkpoints_dir = _acestep_checkpoints_dir(project_root)
+    checkpoint_dir = checkpoints_dir / config_path
+    if _checkpoint_has_weights(checkpoint_dir):
+        return
+
+    raise RuntimeError(
+        "ACE-Step XL checkpoint is not installed.\n"
+        f"  model        : {config_path}\n"
+        f"  expected at  : {checkpoint_dir}\n\n"
+        "XL checkpoints are large optional downloads, so Anvil will not "
+        "auto-download them during model load.\n\n"
+        "Install this checkpoint explicitly, then retry:\n\n"
+        f"    acestep-download --dir {checkpoints_dir} --model {config_path}\n\n"
+        f"To intentionally restore upstream auto-download behavior for this "
+        f"process, set {_XL_AUTO_DOWNLOAD_ENV}=1."
+    )
 
 
 class ACEStepPipeline(BasePipeline):
@@ -101,7 +164,10 @@ class ACEStepPipeline(BasePipeline):
                          omit individual kwargs.  Recognised keys:
                          ``steps``, ``cfg_scale``, ``scheduler_type``,
                          ``shift``, ``thinking``, ``dcw_enabled``,
-                         ``sigma_min``, and ``sigma_max``.
+                         ``sigma_min``, ``sigma_max``, plus init-time ACE-Step
+                         options such as ``offload_to_cpu``,
+                         ``offload_dit_to_cpu``, ``quantization``,
+                         ``prefer_source``, and ``vae_checkpoint``.
     """
 
     #: ACE-Step v1.5 VAE outputs 48 kHz stereo audio.
@@ -153,6 +219,15 @@ class ACEStepPipeline(BasePipeline):
             "sigma_min": 0.0,
             "sigma_max": 0.0,
         }
+        if "offload_to_cpu" in self.default_params:
+            offload_to_cpu = bool(self.default_params["offload_to_cpu"])
+        offload_dit_to_cpu = bool(
+            self.default_params.get("offload_dit_to_cpu", False)
+        )
+        quantization = self.default_params.get("quantization")
+        prefer_source = self.default_params.get("prefer_source")
+        vae_checkpoint = self.default_params.get("vae_checkpoint")
+
         if use_mlx_dit is None and "use_mlx_dit" in self.default_params:
             use_mlx_dit = bool(self.default_params["use_mlx_dit"])
         if use_mlx_dit is None:
@@ -164,6 +239,7 @@ class ACEStepPipeline(BasePipeline):
         # values sending downloads/logs to an old checkout.
         os.makedirs(resolved_root, exist_ok=True)
         os.environ["ACESTEP_PROJECT_ROOT"] = resolved_root
+        _raise_for_missing_xl_checkpoint(resolved_root, config_path)
 
         # On macOS, set ACESTEP_LM_BACKEND=mlx unless the user has already
         # set it.
@@ -175,6 +251,8 @@ class ACEStepPipeline(BasePipeline):
             f"->->-> Initialising ACE-Step  "
             f"config={config_path!r}  device={device!r}  "
             f"offload={offload_to_cpu}"
+            + (f"  dit_offload={offload_dit_to_cpu}" if offload_dit_to_cpu else "")
+            + (f"  quantization={quantization}" if quantization else "")
             + ("  mlx=DiT+VAE+LM" if on_apple_silicon and self._use_mlx_dit else ""),
             file=sys.stderr,
         )
@@ -189,7 +267,11 @@ class ACEStepPipeline(BasePipeline):
                 config_path=config_path,
                 device=device,
                 offload_to_cpu=offload_to_cpu,
+                offload_dit_to_cpu=offload_dit_to_cpu,
+                quantization=quantization,
+                prefer_source=prefer_source,
                 use_mlx_dit=self._use_mlx_dit,
+                vae_checkpoint=vae_checkpoint,
             )
         if not success:
             raise RuntimeError(
@@ -320,6 +402,9 @@ class ACEStepPipeline(BasePipeline):
         ``prompt``    Tags / style caption (e.g. ``"upbeat indie pop"``).
         ``lyrics``    Lyric text.  Omit or pass ``"[Instrumental]"`` for
                       instrumental output.
+        ``negative_prompt`` Negative text for ACE-Step's LM/thinking stage.
+                      Direct DiT-only generation preserves this in metadata but
+                      upstream ACE-Step does not expose a DiT negative prompt.
         ``seconds_total`` Target duration in seconds.  ``None`` or ``≤0``
                       lets ACE-Step choose automatically.
         ============  =====================================================
@@ -454,6 +539,12 @@ class ACEStepPipeline(BasePipeline):
         for cond in conditioning:
             tags: str = cond.get("prompt", "")
             lyrics: str = cond.get("lyrics", "")
+            negative_prompt = str(
+                cond.get(
+                    "lm_negative_prompt",
+                    cond.get("negative_prompt", effective_lm_negative_prompt),
+                )
+            )
 
             raw_dur = cond.get("seconds_total")
             duration: float | None = (
@@ -496,7 +587,7 @@ class ACEStepPipeline(BasePipeline):
                 lm_cfg_scale=effective_lm_cfg,
                 lm_top_k=effective_lm_top_k,
                 lm_top_p=effective_lm_top_p,
-                lm_negative_prompt=effective_lm_negative_prompt,
+                lm_negative_prompt=negative_prompt,
                 use_cot_metas=effective_use_cot_metas,
                 use_cot_caption=effective_use_cot_caption,
                 use_cot_language=effective_use_cot_language,

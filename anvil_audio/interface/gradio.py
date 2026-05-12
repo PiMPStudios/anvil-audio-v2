@@ -589,6 +589,7 @@ def generate_lm(
 def generate_acestep(
     prompt: str,
     lyrics: str = "",
+    negative_prompt: str = "",
     seconds_total: float = 30.0,
     steps: int = 8,
     cfg_scale: float = 7.0,
@@ -602,6 +603,8 @@ def generate_acestep(
         prompt:        Tags / style caption (e.g. ``"upbeat indie pop, energetic"``).
         lyrics:        Lyric text.  Leave blank or pass ``"[Instrumental]"`` for
                        instrumental output.
+        negative_prompt: Text describing sounds or qualities to avoid. ACE-Step
+                         applies this to the LM/thinking path when enabled.
         seconds_total: Duration of the generated audio in seconds.
         steps:         Number of diffusion steps (8 = turbo, 60 = full quality).
         cfg_scale:     Classifier-free guidance scale.
@@ -620,11 +623,20 @@ def generate_acestep(
     print("=== ACE-Step generation ===")
     print(f"\tPrompt (tags): {prompt}")
     print(f"\tLyrics: {lyrics[:60]!r}{'...' if len(lyrics) > 60 else ''}")
+    if negative_prompt:
+        print(f"\tNegative prompt: {negative_prompt}")
     print(f"\tDuration: {seconds_total}s  |  Steps: {steps}  |  CFG: {cfg_scale}  |  Seed: {seed}")
 
     effective_seed = int(seed) if int(seed) != -1 else int(np.random.randint(0, 2**32 - 1))
 
-    conditioning = [{"prompt": prompt, "lyrics": lyrics, "seconds_total": seconds_total}]
+    conditioning = [
+        {
+            "prompt": prompt,
+            "lyrics": lyrics,
+            "negative_prompt": negative_prompt or "",
+            "seconds_total": seconds_total,
+        }
+    ]
 
     import time as _time
     _gen_t0 = _time.perf_counter()
@@ -655,6 +667,7 @@ def generate_acestep(
         sigma_max=0.0,
         duration_seconds=audio_int16.shape[-1] / sample_rate,
         timestamp=ts,
+        negative_prompt=negative_prompt or "",
         seconds_start=0.0,
         seconds_total=float(seconds_total),
         generation_duration_seconds=_gen_duration,
@@ -696,6 +709,7 @@ def generate_unified(
         result = generate_acestep(
             prompt=prompt,
             lyrics=lyrics,
+            negative_prompt=negative_prompt or "",
             seconds_total=seconds_total,
             steps=steps,
             cfg_scale=cfg_scale,
@@ -947,7 +961,7 @@ def _model_load_ui_unified(
         return (
             status,
             gr.update(visible=True),   # lyrics_row
-            gr.update(visible=False),  # neg_prompt_row
+            gr.update(visible=True),   # neg_prompt_row
             gr.update(visible=False),  # diffusion_controls
             gr.update(value=dur_val, maximum=max_dur),
             gr.update(value=int(p.get("steps", 50))),
@@ -1215,6 +1229,14 @@ def create_acestep_ui(project_component: Any, default_params: dict | None = None
                     "[bridge].  Leave blank for an instrumental track."
                 ),
             )
+            negative_prompt = gr.Textbox(
+                show_label=False,
+                placeholder="Negative prompt",
+                info=(
+                    "Describe what you don't want in the output. For ACE-Step, "
+                    "this controls the LM/thinking path when enabled."
+                ),
+            )
         generate_button = gr.Button("Generate", variant="primary", scale=1)
 
     with gr.Row(equal_height=False):
@@ -1248,7 +1270,7 @@ def create_acestep_ui(project_component: Any, default_params: dict | None = None
     generate_button.click(
         fn=generate_acestep,
         inputs=[
-            prompt, lyrics,
+            prompt, lyrics, negative_prompt,
             seconds_total_slider, steps_slider, cfg_scale_slider,
             seed_input, project_component,
         ],
@@ -1486,7 +1508,7 @@ def create_unified_txt2music_ui(
         info="Describe the sound or music you want to generate.",
     )
 
-    # 2. Lyrics (ACE-Step only) / Negative prompt (diffusion only)
+    # 2. Lyrics (ACE-Step only) / Negative prompt
     with gr.Row(visible=is_acestep) as lyrics_row:
         lyrics = gr.Textbox(
             show_label=False,
@@ -1494,7 +1516,7 @@ def create_unified_txt2music_ui(
             lines=4,
             info="Structure lyrics with section markers like [verse], [chorus], [bridge].",
         )
-    with gr.Row(visible=is_diffusion) as neg_prompt_row:
+    with gr.Row(visible=True) as neg_prompt_row:
         negative_prompt = gr.Textbox(
             show_label=False,
             placeholder="Negative prompt",

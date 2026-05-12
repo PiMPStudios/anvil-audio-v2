@@ -8,6 +8,20 @@ import pytest
 import torch
 
 
+def _install_fake_acestep_handler(monkeypatch, calls):
+    class FakeAceStepHandler:
+        def initialize_service(self, **kwargs):
+            calls["initialize_service"] = kwargs
+            return "ok", True
+
+    acestep_pkg = types.ModuleType("acestep")
+    handler_mod = types.ModuleType("acestep.handler")
+    handler_mod.AceStepHandler = FakeAceStepHandler
+
+    monkeypatch.setitem(sys.modules, "acestep", acestep_pkg)
+    monkeypatch.setitem(sys.modules, "acestep.handler", handler_mod)
+
+
 def test_import_error_without_project_root_gives_clear_message(monkeypatch):
     """When acestep isn't installed and project_root=None, error is actionable."""
     for key in list(sys.modules.keys()):
@@ -54,6 +68,60 @@ def test_project_root_none_skips_sys_path_injection(monkeypatch):
 
     new_entries = [p for p in sys.path if p not in path_before]
     assert not new_entries, f"sys.path was mutated with project_root=None: {new_entries}"
+
+
+def test_missing_xl_checkpoint_blocks_auto_download(monkeypatch, tmp_path):
+    """XL variants are optional and should not auto-download on model load."""
+    calls = {}
+    _install_fake_acestep_handler(monkeypatch, calls)
+    monkeypatch.delenv("ANVIL_ACESTEP_ALLOW_XL_AUTO_DOWNLOAD", raising=False)
+
+    from anvil_audio.pipelines.acestep import ACEStepPipeline
+
+    with pytest.raises(RuntimeError, match="large optional downloads"):
+        ACEStepPipeline(
+            project_root=str(tmp_path),
+            config_path="acestep-v15-xl-sft",
+            device="cpu",
+        )
+
+    assert "initialize_service" not in calls
+
+
+def test_installed_xl_checkpoint_allows_load_and_forwards_init_options(
+    monkeypatch,
+    tmp_path,
+):
+    """Installed XL checkpoints can load, including registry-provided memory knobs."""
+    calls = {}
+    _install_fake_acestep_handler(monkeypatch, calls)
+    monkeypatch.delenv("ANVIL_ACESTEP_ALLOW_XL_AUTO_DOWNLOAD", raising=False)
+
+    checkpoint_dir = tmp_path / "checkpoints" / "acestep-v15-xl-turbo"
+    checkpoint_dir.mkdir(parents=True)
+    (checkpoint_dir / "model.safetensors").write_bytes(b"placeholder")
+
+    from anvil_audio.pipelines.acestep import ACEStepPipeline
+
+    ACEStepPipeline(
+        project_root=str(tmp_path),
+        config_path="acestep-v15-xl-turbo",
+        device="cpu",
+        default_params={
+            "offload_to_cpu": True,
+            "offload_dit_to_cpu": True,
+            "quantization": "int8_weight_only",
+            "prefer_source": "huggingface",
+            "vae_checkpoint": "scragvae",
+        },
+    )
+
+    init_kwargs = calls["initialize_service"]
+    assert init_kwargs["offload_to_cpu"] is True
+    assert init_kwargs["offload_dit_to_cpu"] is True
+    assert init_kwargs["quantization"] == "int8_weight_only"
+    assert init_kwargs["prefer_source"] == "huggingface"
+    assert init_kwargs["vae_checkpoint"] == "scragvae"
 
 
 def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path):
@@ -132,7 +200,14 @@ def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path
         },
     )
     audio = pipe.generate(
-        [{"prompt": "instrumental rock", "lyrics": "", "seconds_total": 10}],
+        [
+            {
+                "prompt": "instrumental rock",
+                "lyrics": "",
+                "negative_prompt": "muddy mix, clipped vocals",
+                "seconds_total": 10,
+            }
+        ],
         seed=123,
     )
 
@@ -150,6 +225,7 @@ def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path
     assert params.velocity_norm_threshold == 0.0
     assert params.velocity_ema_factor == 0.0
     assert params.lm_cfg_scale == 2.0
+    assert params.lm_negative_prompt == "muddy mix, clipped vocals"
     assert params.inference_steps == 50
     assert params.guidance_scale == 7.5
     assert params.shift == 3.0

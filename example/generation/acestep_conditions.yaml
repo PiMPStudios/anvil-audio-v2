@@ -5,6 +5,7 @@
 #
 # Each leaf entry supports these keys:
 #   prompt        (str)   Tags / style caption — comma-separated works best
+#   negative_prompt (str) Optional things to avoid
 #   lyrics        (str)   Optional lyric text; use "[Instrumental]" for no vocals
 #   seconds_total (float) Duration in seconds (omit to let ACE-Step auto-choose)
 #
@@ -26,6 +27,7 @@ tracks:
 
   electronic_instrumental:
     prompt: "electronic, synthwave, driving bass, retro 80s, cinematic"
+    negative_prompt: "muddy low end, harsh treble, clipping"
     lyrics: "[Instrumental]"
     seconds_total: 45.0
 

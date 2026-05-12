@@ -55,6 +55,10 @@ fi
 echo "Installing anvil-audio..."
 $PIP install -e . --quiet
 
+# ── Test tooling ──────────────────────────────────────────────────────────────
+echo "Installing test tooling (pytest)..."
+$PIP install pytest --quiet
+
 # ── MLX acceleration (Apple Silicon only) ────────────────────────────────────
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo "Installing MLX acceleration (mlx-audiogen)..."
