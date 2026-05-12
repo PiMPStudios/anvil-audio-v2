@@ -27,7 +27,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import torch
-import torch.nn as nn
 from torch import Tensor
 
 from .interfaces import BaseCompressor, BaseConditioner, BaseGenerator, BasePipeline

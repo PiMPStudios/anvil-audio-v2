@@ -1,5 +1,6 @@
 # Autoencoders
-At a high level, autoencoders are models constructed of two parts: an *encoder*, and a *decoder*. 
+
+At a high level, autoencoders are models constructed of two parts: an *encoder*, and a *decoder*.
 
 The *encoder* takes in an sequence (such as mono or stereo audio) and outputs a compressed representation of that sequence as a d-channel "latent sequence", usually heavily downsampled by a constant factor.
 
@@ -10,6 +11,7 @@ Autoencoders are trained with a combination of reconstruction and adversarial lo
 The autoencoder architectures defined in `stable-audio-tools` are largely fully-convolutional, which allows autoencoders trained on small lengths to be applied to arbitrary-length sequences. For example, an autoencoder trained on 1-second samples could be used to encode 45-second inputs to a latent diffusion model.
 
 # Model configs
+
 The model config file for an autoencoder should set the `model_type` to `autoencoder`, and the `model` object should have the following properties:
 
 - `encoder`
@@ -37,11 +39,13 @@ The model config file for an autoencoder should set the `model_type` to `autoenc
     - Optional
 
 # Training configs
+
 The `training` config in the autoencoder model config file should have the following properties:
+
 - `learning_rate`
     - The learning rate to use during training
 - `use_ema`
-    - If true, a copy of the model weights is maintained during training and updated as an exponential moving average of the trained model's weights. 
+    - If true, a copy of the model weights is maintained during training and updated as an exponential moving average of the trained model's weights.
     - Optional. Default: `false`
 - `warmup_steps`
     - The number of training steps before turning on adversarial losses
@@ -57,18 +61,21 @@ The `training` config in the autoencoder model config file should have the follo
     - Optional
 
 ## Loss configs
+
 There are few different types of losses that are used for autoencoder training, including spectral losses, time-domain losses, adversarial losses, and bottleneck-specific losses.
 
 Hyperparameters for these losses as well as loss weighting factors can be configured in the `loss_configs` property in the `training` config.
 
 ### Spectral losses
-Multi-resolution STFT losses are the main reconstruction loss used for our audio autoencoders. We use the [auraloss](https://github.com/csteinmetz1/auraloss/tree/main/auraloss) library for our spectral loss functions. 
 
-For mono autoencoders (`io_channels` == 1), we use the [MultiResolutionSTFTLoss](https://github.com/csteinmetz1/auraloss/blob/1576b0cd6e927abc002b23cf3bfc455b660f663c/auraloss/freq.py#L329) module. 
+Multi-resolution STFT losses are the main reconstruction loss used for our audio autoencoders. We use the [auraloss](https://github.com/csteinmetz1/auraloss/tree/main/auraloss) library for our spectral loss functions.
 
-For stereo autoencoders (`io_channels` == 2), we use the [SumAndDifferenceSTFTLoss](https://github.com/csteinmetz1/auraloss/blob/1576b0cd6e927abc002b23cf3bfc455b660f663c/auraloss/freq.py#L533) module. 
+For mono autoencoders (`io_channels` == 1), we use the [MultiResolutionSTFTLoss](https://github.com/csteinmetz1/auraloss/blob/1576b0cd6e927abc002b23cf3bfc455b660f663c/auraloss/freq.py#L329) module.
+
+For stereo autoencoders (`io_channels` == 2), we use the [SumAndDifferenceSTFTLoss](https://github.com/csteinmetz1/auraloss/blob/1576b0cd6e927abc002b23cf3bfc455b660f663c/auraloss/freq.py#L533) module.
 
 #### Example config
+
 ```json
 "spectral": {
     "type": "mrstft",
@@ -85,9 +92,11 @@ For stereo autoencoders (`io_channels` == 2), we use the [SumAndDifferenceSTFTLo
 ```
 
 ### Time-domain loss
+
 We compute the L1 distance between the original audio and the decoded audio to provide a time-domain loss.
 
 #### Example config
+
 ```json
 "time": {
     "type": "l1",
@@ -98,11 +107,13 @@ We compute the L1 distance between the original audio and the decoded audio to p
 ```
 
 ### Adversarial losses
+
 Adversarial losses bring in an ensemble of discriminator models to discriminate between real and fake audio, providing a signal to the autoencoder on perceptual discrepancies to fix.
 
 We largely rely on the [multi-scale STFT discriminator](https://github.com/facebookresearch/encodec/blob/0e2d0aed29362c8e8f52494baf3e6f99056b214f/encodec/msstftd.py#L99) from the EnCodec repo
 
 #### Example config
+
 ```json
 "discriminator": {
     "type": "encodec",
@@ -120,9 +131,11 @@ We largely rely on the [multi-scale STFT discriminator](https://github.com/faceb
 ```
 
 ## Demo config
+
 The only property to set for autoencoder training demos is the `demo_every` property, determining the number of steps between demos.
 
 ### Example config
+
 ```json
 "demo": {
     "demo_every": 2000
@@ -130,12 +143,15 @@ The only property to set for autoencoder training demos is the `demo_every` prop
 ```
 
 # Encoder and decoder types
-Encoders and decoders are defined separately in the model configuration, so encoders and decoders from different model architectures and libraries can be used interchangeably. 
+
+Encoders and decoders are defined separately in the model configuration, so encoders and decoders from different model architectures and libraries can be used interchangeably.
 
 ## Oobleck
+
 Oobleck is Harmonai's in-house autoencoder architecture, implementing features from a variety of other autoencoder architectures.
 
 ### Example config
+
 ```json
 "encoder": {
     "type": "oobleck",
@@ -163,11 +179,13 @@ Oobleck is Harmonai's in-house autoencoder architecture, implementing features f
 ```
 
 ## DAC
+
 This is the Encoder and Decoder definitions from the `descript-audio-codec` repo. It's a simple fully-convolutional autoencoder with channels doubling every level. The encoder and decoder configs are passed directly into the constructors for the DAC [Encoder](https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L64) and [Decoder](https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L115).
 
 **Note: This does not include the DAC quantizer, and does not load pre-trained DAC models, this is just the encoder and decoder definitions.**
 
 ### Example config
+
 ```json
 "encoder": {
     "type": "dac",
@@ -190,11 +208,13 @@ This is the Encoder and Decoder definitions from the `descript-audio-codec` repo
 ```
 
 ## SEANet
+
 This is the SEANetEncoder and SEANetDecoder definitions from Meta's EnCodec repo. This is the same encoder and decoder architecture used in the EnCodec models used in MusicGen, without the quantizer.
 
 The encoder and decoder configs are passed directly into the [SEANetEncoder](https://github.com/facebookresearch/encodec/blob/0e2d0aed29362c8e8f52494baf3e6f99056b214f/encodec/modules/seanet.py#L66C12-L66C12) and [SEANetDecoder](https://github.com/facebookresearch/encodec/blob/0e2d0aed29362c8e8f52494baf3e6f99056b214f/encodec/modules/seanet.py#L147) classes directly, though we reverse the input order of the strides (ratios) in the encoder to make it consistent with the order in the decoder.
 
 ### Example config
+
 ```json
 "encoder": {
     "type": "seanet",
@@ -225,11 +245,12 @@ The encoder and decoder configs are passed directly into the [SEANetEncoder](htt
 ```
 
 # Bottlenecks
+
 In our terminology, the "bottleneck" of an autoencoder is a module placed between the encoder and decoder to enforce particular constraints on the latent space the encoder creates.
 
 Bottlenecks have a similar interface to the autoencoder with `encode()` and `decode()` functions defined. Some bottlenecks return extra information in addition to the output latent series, such as quantized token indices, or additional losses to be considered during training.
 
-To define a bottleneck for the autoencoder, you can provide the `bottleneck` object in the autoencoder's model configuration, with the following 
+To define a bottleneck for the autoencoder, you can provide the `bottleneck` object in the autoencoder's model configuration, with the following
 
 ## VAE
 
@@ -238,6 +259,7 @@ The Variational Autoencoder (VAE) bottleneck splits the encoder's output in half
 **Note: For the VAE bottleneck to work, the output dimension of the encoder must be twice the size of the input dimension for the decoder.**
 
 ### Example config
+
 ```json
 "bottleneck": {
     "type": "vae"
@@ -245,9 +267,11 @@ The Variational Autoencoder (VAE) bottleneck splits the encoder's output in half
 ```
 
 ### Extra info
+
 The VAE bottleneck also returns a `kl` value in the encoder info. This is the [KL divergence](https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence) between encoded/sampled latent space and a Gaussian distribution. By including this value as a loss value to optimize, we push our latent distribution closer to a normal distribution, potentially trading off reconstruction quality.
 
 ### Example loss config
+
 ```json
 "bottleneck": {
     "type": "kl",
@@ -258,9 +282,11 @@ The VAE bottleneck also returns a `kl` value in the encoder info. This is the [K
 ```
 
 ## Tanh
+
 This bottleneck applies the tanh function to the latent series, "soft-clipping" the latent values to be between -1 and 1. This is a quick and dirty way to enforce a limit on the variance of the latent space, but training these models can be unstable as it's seemingly easy for the latent space to saturate the values to -1 or 1 and never recover.
 
 ### Example config
+
 ```json
 "bottleneck": {
     "type": "tanh"
@@ -268,6 +294,7 @@ This bottleneck applies the tanh function to the latent series, "soft-clipping" 
 ```
 
 ## Wasserstein
+
 The Wasserstein bottleneck implements the WAE-MMD regularization method from the [Wasserstein Auto-Encoders](https://arxiv.org/abs/1711.01558) paper, calculating the Maximum Mean Discrepancy (MMD) between the latent space and a Gaussian distribution. Including this value as a loss value to optimize leads to a more Gaussian latent space, but does not require stochastic sampling as with a VAE, so the encoder is deterministic.
 
 The Wasserstein bottleneck also exposes the `noise_augment_dim` property, which concatenates `noise_augment_dim` channels of Gaussian noise to the latent series before passing into the decoder. This adds some stochasticity to the latents which can be helpful for adversarial training, while keeping the encoder outputs deterministic.
@@ -275,6 +302,7 @@ The Wasserstein bottleneck also exposes the `noise_augment_dim` property, which 
 **Note: Calculating MMD is highly VRAM-intensive for longer sequence lengths. Therefore, training a Wasserstein autoencoder is best achieved with autoencoders that have a significant downsampling factor or with shorter sequence lengths. During inference, the MMD calculation is disabled.**
 
 ### Example config
+
 ```json
 "bottleneck": {
     "type": "wasserstein"
@@ -282,9 +310,11 @@ The Wasserstein bottleneck also exposes the `noise_augment_dim` property, which 
 ```
 
 ### Extra info
+
 This bottleneck adds the `mmd` value to the encoder info, representing the Maximum Mean Discrepancy.
 
 ### Example loss config
+
 ```json
 "bottleneck": {
     "type": "mmd",
@@ -295,25 +325,27 @@ This bottleneck adds the `mmd` value to the encoder info, representing the Maxim
 ```
 
 ## L2 normalization (Spherical autoencoder)
+
 The L2 normalization bottleneck normalizes the latents across the channel-dimension, projecting the latents to a d-dimensional hypersphere. This acts as a form of latent space normalization.
 
-
 ### Example config
+
 ```json
 "bottleneck": {
     "type": "l2_norm"
 }
 ```
 
-
 ## RVQ
+
 Residual vector quantization (RVQ) is currently the leading method for learning discrete neural audio codecs (tokenizers for audio). In vector quantization, each item in the latent sequence is individually "snapped" to the nearest vector in a discrete "codebook" of learned vectors. The index of the vector in the codebook can then be used as a token index for things like autoregressive transformers. Residual vector quantization improves the precision of normal vector quantization by adding additional codebooks. For a deeper dive into RVQ, check out [this blog post by Dr. Scott Hawley](https://drscotthawley.github.io/blog/posts/2023-06-12-RVQ.html).
 
 This RVQ bottleneck uses [lucidrains' implementation](https://github.com/lucidrains/vector-quantize-pytorch/tree/master) from the `vector-quantize-pytorch` repo, which provides a lot of different quantizer options. The bottleneck config is passed through to the `ResidualVQ`  [constructor](https://github.com/lucidrains/vector-quantize-pytorch/blob/0c6cea24ce68510b607f2c9997e766d9d55c085b/vector_quantize_pytorch/residual_vq.py#L26).
 
-**Note: This RVQ implementation uses manual replacement of codebook vectors to reduce codebook collapse. This does not work with multi-GPU training as the random replacement is not synchronized across devices.** 
+**Note: This RVQ implementation uses manual replacement of codebook vectors to reduce codebook collapse. This does not work with multi-GPU training as the random replacement is not synchronized across devices.**
 
 ### Example config
+
 ```json
 "bottleneck": {
     "type": "rvq",
@@ -327,13 +359,15 @@ This RVQ bottleneck uses [lucidrains' implementation](https://github.com/lucidra
 ```
 
 ## DAC RVQ
-This is the residual vector quantization implementation from the `descript-audio-codec` repo. It differs from the above implementation in that it does not use manual replacements to improve codebook usage, but instead uses learnable linear layers to project the latents down to a lower-dimensional space before performing the individual quantization operations. This means it's compatible with distributed training. 
+
+This is the residual vector quantization implementation from the `descript-audio-codec` repo. It differs from the above implementation in that it does not use manual replacements to improve codebook usage, but instead uses learnable linear layers to project the latents down to a lower-dimensional space before performing the individual quantization operations. This means it's compatible with distributed training.
 
 The bottleneck config is passed directly into the `ResidualVectorQuantize` [constructor](https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/nn/quantize.py#L97).
 
 The `quantize_on_decode` property is also exposed, which moves the quantization process to the decoder. This should not be used during training, but is helpful when training latent diffusion models that use the quantization process as a way to remove error after the diffusion sampling process.
 
 ### Example config
+
 ```json
 "bottleneck": {
     "type": "dac_rvq",
@@ -348,7 +382,9 @@ The `quantize_on_decode` property is also exposed, which moves the quantization 
 ```
 
 ### Extra info
+
 The DAC RVQ bottleneck also adds the following properties to the `info` object:
+
 - `pre_quantizer`
     - The pre-quantization latent series, useful in combination with `quantize_on_decode` for training latent diffusion models.
 - `vq/commitment_loss`

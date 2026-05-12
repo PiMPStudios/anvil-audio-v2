@@ -6,7 +6,7 @@ import torch
 
 from .utils import prepare_audio
 from .sampling import sample_k, sample_rf, sample_rf_denoiser
-from anvil_audio.utils.torch_common import exists, empty_cache, get_best_device
+from anvil_audio.utils.torch_common import empty_cache, get_best_device
 
 
 @torch.no_grad()

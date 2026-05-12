@@ -293,6 +293,8 @@ class ACEStepPipeline(BasePipeline):
         if lm_model_path is not None:
             self._init_lm_planner(lm_model_path, device, offload_to_cpu)
 
+        self._loaded_lora_adapters: dict[str, str] = {}
+
     def _init_lm_planner(
         self,
         lm_model_path: str,
@@ -645,6 +647,55 @@ class ACEStepPipeline(BasePipeline):
             for t in audio_tensors
         ]
         return torch.stack(padded)
+
+    def apply_lora_adapter(
+        self,
+        lora_path: str,
+        *,
+        adapter_name: str | None = None,
+        scale: float = 1.0,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Load and activate an ACE-Step LoRA/LoKr adapter.
+
+        The actual injection/scaling is delegated to ACE-Step's handler. This
+        wrapper makes the operation idempotent for the common case where the UI
+        or CLI sends the same adapter path across multiple generations.
+        """
+        path = str(Path(lora_path).expanduser().resolve())
+        effective_name = adapter_name or Path(path).name
+
+        loaded_path = self._loaded_lora_adapters.get(effective_name)
+        if loaded_path != path:
+            message = self._handler.add_lora(path, adapter_name=adapter_name)
+            if not str(message).startswith("✅"):
+                raise RuntimeError(str(message))
+            self._loaded_lora_adapters[effective_name] = path
+        else:
+            message = f"Adapter already loaded: {effective_name}"
+
+        active_message = ""
+        if adapter_name and hasattr(self._handler, "set_active_lora_adapter"):
+            active_message = str(self._handler.set_active_lora_adapter(adapter_name))
+
+        scale_message = str(self._handler.set_lora_scale(effective_name, scale))
+        enabled_message = str(self._handler.set_use_lora(bool(enabled)))
+        status = (
+            self._handler.get_lora_status()
+            if hasattr(self._handler, "get_lora_status")
+            else {}
+        )
+        return {
+            "message": str(message),
+            "active_message": active_message,
+            "scale_message": scale_message,
+            "enabled_message": enabled_message,
+            "path": path,
+            "adapter_name": effective_name,
+            "scale": float(scale),
+            "enabled": bool(enabled),
+            "status": status,
+        }
 
     def to(self, device: str | torch.device) -> "ACEStepPipeline":
         """No-op: ACE-Step initialises its device at construction time.

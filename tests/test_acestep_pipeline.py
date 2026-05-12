@@ -232,3 +232,62 @@ def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path
     config = calls["generate_music"]["config"]
     assert config.use_random_seed is False
     assert config.seeds == [123]
+
+
+def test_apply_lora_adapter_delegates_to_acestep_handler(monkeypatch, tmp_path):
+    """ACEStepPipeline should use upstream handler APIs for LoRA loading."""
+    calls = {"add_lora": []}
+
+    class FakeAceStepHandler:
+        def initialize_service(self, **kwargs):
+            calls["initialize_service"] = kwargs
+            return "ok", True
+
+        def add_lora(self, path, adapter_name=None):
+            calls["add_lora"].append((path, adapter_name))
+            return "✅ loaded"
+
+        def set_active_lora_adapter(self, adapter_name):
+            calls["active"] = adapter_name
+            return "✅ active"
+
+        def set_lora_scale(self, adapter_name, scale):
+            calls["scale"] = (adapter_name, scale)
+            return "✅ scale"
+
+        def set_use_lora(self, enabled):
+            calls["enabled"] = enabled
+            return "✅ enabled"
+
+        def get_lora_status(self):
+            return {"loaded": True, "active": True}
+
+    acestep_pkg = types.ModuleType("acestep")
+    handler_mod = types.ModuleType("acestep.handler")
+    handler_mod.AceStepHandler = FakeAceStepHandler
+    monkeypatch.setitem(sys.modules, "acestep", acestep_pkg)
+    monkeypatch.setitem(sys.modules, "acestep.handler", handler_mod)
+
+    from anvil_audio.pipelines.acestep import ACEStepPipeline
+
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    pipe = ACEStepPipeline(project_root=str(tmp_path), device="cpu")
+
+    status = pipe.apply_lora_adapter(
+        str(adapter_dir),
+        adapter_name="style",
+        scale=0.6,
+    )
+    second = pipe.apply_lora_adapter(
+        str(adapter_dir),
+        adapter_name="style",
+        scale=0.4,
+    )
+
+    assert calls["add_lora"] == [(str(adapter_dir.resolve()), "style")]
+    assert calls["active"] == "style"
+    assert calls["scale"] == ("style", 0.4)
+    assert calls["enabled"] is True
+    assert status["adapter_name"] == "style"
+    assert second["message"] == "Adapter already loaded: style"

@@ -646,6 +646,8 @@ def generate_acestep(
     seed: int = -1,
     project: str = "",
     audio_format: str = "wav",
+    lora_reference: str = "",
+    lora_scale: float = 1.0,
 ) -> tuple[str, list[Any], dict[str, Any]]:
     """Generate music with ACE-Step.
 
@@ -660,6 +662,8 @@ def generate_acestep(
         cfg_scale:     Classifier-free guidance scale.
         seed:          RNG seed; -1 means random.
         project:       Project name for output routing.
+        lora_reference: Optional registered adapter id/name or direct path.
+        lora_scale:     LoRA strength from 0.0 to 1.0.
 
     Returns:
         ``(wav_path, [spectrogram_image], metadata_dict)``
@@ -675,6 +679,25 @@ def generate_acestep(
     print(f"\tLyrics: {lyrics[:60]!r}{'...' if len(lyrics) > 60 else ''}")
     if negative_prompt:
         print(f"\tNegative prompt: {negative_prompt}")
+    lora_metadata: dict[str, Any] = {}
+    if lora_reference and lora_reference.strip():
+        from anvil_audio.lora import resolve_adapter_reference
+
+        lora_path, lora_entry = resolve_adapter_reference(lora_reference)
+        apply_lora = getattr(pipeline, "apply_lora_adapter", None)
+        if not callable(apply_lora):
+            raise RuntimeError("Current ACE-Step pipeline does not support LoRA loading.")
+        lora_status = apply_lora(str(lora_path), scale=float(lora_scale))
+        lora_metadata = {
+            "lora": {
+                "reference": lora_reference,
+                "path": str(lora_path),
+                "scale": float(lora_scale),
+                "registry_id": lora_entry.id if lora_entry else None,
+                "status": lora_status,
+            }
+        }
+        print(f"\tLoRA: {lora_reference} scale={float(lora_scale):.2f}")
     print(
         f"\tDuration: {seconds_total}s  |  Steps: {steps}  |  CFG: {cfg_scale}  |  Seed: {seed}"
     )
@@ -727,7 +750,7 @@ def generate_acestep(
         seconds_start=0.0,
         seconds_total=float(seconds_total),
         generation_duration_seconds=_gen_duration,
-        extra={"lyrics": lyrics},
+        extra={"lyrics": lyrics} | lora_metadata,
     )
     path, _ = output_manager.save_audio(
         audio_int16.cpu(), meta, sample_rate, ext=audio_format
@@ -756,6 +779,8 @@ def generate_unified(
     init_noise_level: float,
     project: str,
     audio_format: str = "wav",
+    lora_reference: str = "",
+    lora_scale: float = 1.0,
 ) -> tuple[str, list[Any], dict[str, Any]]:
     """Route to the correct generation backend based on the currently loaded pipeline type."""
     global _last_generated_path
@@ -775,6 +800,8 @@ def generate_unified(
             seed=seed,
             project=project,
             audio_format=audio_format,
+            lora_reference=lora_reference,
+            lora_scale=lora_scale,
         )
     else:
         result = generate_cond(
@@ -1044,6 +1071,7 @@ def _model_load_ui_unified(
             gr.update(visible=True),  # neg_prompt_row
             gr.update(visible=True),  # intelligence_lyrics_row
             gr.update(visible=False),  # diffusion_controls
+            gr.update(visible=True),  # lora_controls
             gr.update(value=dur_val, maximum=max_dur),
             gr.update(value=int(p.get("steps", 50))),
             gr.update(value=float(p.get("cfg_scale", 4.0))),
@@ -1067,6 +1095,7 @@ def _model_load_ui_unified(
         gr.update(visible=True),  # neg_prompt_row
         gr.update(visible=False),  # intelligence_lyrics_row
         gr.update(visible=True),  # diffusion_controls
+        gr.update(visible=False),  # lora_controls
         gr.update(maximum=max_dur, value=default_dur),
         gr.update(value=int(p.get("steps", 100))),
         gr.update(value=float(p.get("cfg_scale", 7.0))),
@@ -1945,7 +1974,7 @@ def create_unified_txt2music_ui(
 
     Returns:
         (lyrics_row, neg_prompt_row, intelligence_lyrics_row, diffusion_controls,
-         seconds_total_slider, steps_slider, cfg_scale_slider,
+         lora_controls, seconds_total_slider, steps_slider, cfg_scale_slider,
          sampler_type_dropdown, sigma_min_slider, sigma_max_slider)
     """
     import gradio as gr
@@ -2019,6 +2048,23 @@ def create_unified_txt2music_ui(
         with gr.Row(visible=is_acestep) as intelligence_lyrics_row:
             write_lyrics_button = gr.Button("Write Lyrics", variant="secondary")
             prepare_song_button = gr.Button("Enhance + Lyrics", variant="secondary")
+
+    with gr.Group(visible=is_acestep) as lora_controls:
+        with gr.Accordion("ACE-Step LoRA", open=False):
+            with gr.Row():
+                lora_reference = gr.Textbox(
+                    label="Adapter",
+                    placeholder="Registered adapter id/name or PEFT/LoKr path",
+                    info="Use `anvil lora list` to see registered adapters.",
+                )
+                lora_scale = gr.Slider(
+                    minimum=0.0,
+                    maximum=1.0,
+                    step=0.05,
+                    value=1.0,
+                    label="LoRA scale",
+                    info="Adapter strength. 1.0 is full strength; lower values blend with the base model.",
+                )
 
     # 3. Generation controls — single row
     with gr.Row():
@@ -2199,6 +2245,8 @@ def create_unified_txt2music_ui(
             init_noise_level_slider,
             project_component,
             audio_format_dropdown,
+            lora_reference,
+            lora_scale,
         ],
         outputs=[audio_output, audio_spectrogram_output, metadata_output],
         api_name="generate",
@@ -2256,6 +2304,7 @@ def create_unified_txt2music_ui(
         neg_prompt_row,
         intelligence_lyrics_row,
         diffusion_controls,
+        lora_controls,
         seconds_total_slider,
         steps_slider,
         cfg_scale_slider,

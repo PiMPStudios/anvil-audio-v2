@@ -3,6 +3,7 @@
 Diffusion models learn to denoise data
 
 # Model configs
+
 The model config file for a diffusion model should set the `model_type` to `diffusion_cond` if the model uses conditioning, or `diffusion_uncond` if it does not, and the `model` object should have the following properties:
 
 - `diffusion`
@@ -18,6 +19,7 @@ The model config file for a diffusion model should set the `model_type` to `diff
     - Used by inference scripts to determine the shape of the noise to generate for the diffusion model
 
 # Diffusion configs
+
 - `type`
     - The underlying model type for the transformer
     - For conditioned diffusion models, be one of `dit` ([Diffusion Transformer](#diffusion-transformers-dit)), `DAU1d` ([Dance Diffusion U-Net](#dance-diffusion-u-net)), or `adp_cfg_1d` ([audio-diffusion-pytorch U-Net](#audio-diffusion-pytorch-u-net-adp))
@@ -42,13 +44,14 @@ The model config file for a diffusion model should set the `model_type` to `diff
     - Model-dependent
 
 # Training configs
+
 The `training` config in the diffusion model config file should have the following properties:
 
 - `learning_rate`
     - The learning rate to use during training
     - Defaults to constant learning rate, can be overridden with `optimizer_configs`
 - `use_ema`
-    - If true, a copy of the model weights is maintained during training and updated as an exponential moving average of the trained model's weights. 
+    - If true, a copy of the model weights is maintained during training and updated as an exponential moving average of the trained model's weights.
     - Optional. Default: `true`
 - `log_loss_info`
     - If true, additional diffusion loss info will be gathered across all GPUs and displayed during training
@@ -63,6 +66,7 @@ The `training` config in the diffusion model config file should have the followi
     - Configuration for the demos during training, including conditioning information
 
 ## Example config
+
 ```json
 "training": {
     "use_ema": true,
@@ -92,7 +96,9 @@ The `training` config in the diffusion model config file should have the followi
 ```
 
 # Demo configs
+
 The `demo` config in the diffusion model training config should have the following properties:
+
 - `demo_every`
     - How many training steps between demos
 - `demo_steps`
@@ -106,6 +112,7 @@ The `demo` config in the diffusion model training config should have the followi
     - For conditioned diffusion models, this provides a list of classifier-free guidance (CFG) scales to render during the demos. This can be helpful to get an idea of how the model responds to different conditioning strengths as training continues.
 
 ## Example config
+
 ```json
 "demo": {
     "demo_every": 2000,
@@ -138,11 +145,11 @@ This is our custom implementation of a transformer model, based on the `x-transf
 This model type uses the `ContinuousTransformerWrapper` class from the https://github.com/lucidrains/x-transformers repository as the diffusion transformer backbone.
 
 `x-transformers` is a great baseline transformer implementation with lots of options for various experimental settings.
-It's great for testing out experimental features without implementing them yourself, but the implementations might not be fully optimized, and breaking changes may be introduced without much warning. 
+It's great for testing out experimental features without implementing them yourself, but the implementations might not be fully optimized, and breaking changes may be introduced without much warning.
 
 ## Diffusion U-Net
 
-U-Nets use a hierarchical architecture to gradually downsample the input data before more heavy processing is performed, then upsample the data again, using skip connections to pass data across the downsampling "valley" (the "U" in the name) to the upsampling layer at the same resolution. 
+U-Nets use a hierarchical architecture to gradually downsample the input data before more heavy processing is performed, then upsample the data again, using skip connections to pass data across the downsampling "valley" (the "U" in the name) to the upsampling layer at the same resolution.
 
 ### audio-diffusion-pytorch U-Net (ADP)
 

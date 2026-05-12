@@ -31,6 +31,9 @@ registry, CLI, and Gradio UI.
 - **Automated training datasets** — `anvil dataset` can build local or
   YouTube-sourced clip datasets, write captions, generate
   `character_sheet.json`, and emit a training-ready `dataset_config.json`.
+- **ACE-Step LoRA workflows** — import PEFT/LoKr adapters, apply them during
+  generation, and wrap ACE-Step's corrected `training_v2` preprocess/train
+  flow from the `anvil lora` CLI.
 - **MCP server** — expose all generation and editing capabilities to Claude and other MCP clients over stdio; models are cached between calls.
 - **Python 3.12 / 3.13** — uses modern union syntax, `slots=True` dataclasses, and lowercase generics throughout.
 
@@ -188,7 +191,7 @@ entry. The built-in entries default to:
 Both checkpoints are downloaded automatically from HuggingFace on first use.
 
 You can override the LM checkpoint for a specific registry entry via `lm_model_path` in
-`registry.yaml` (see [ACE-Step models](#ace-step-models-1) below), or set a global fallback
+`registry.yaml` (see [ACE-Step models](#ace-step-models) below), or set a global fallback
 for all ACE-Step models via an environment variable:
 
 ```bash
@@ -318,6 +321,13 @@ anvil generate --model acestep-v1.5-turbo \
 anvil generate --model acestep-v1.5-turbo \
     --cond-yaml-path example/generation/acestep_conditions.yaml \
     --output-dir ./out
+
+# Generate with a registered LoRA adapter
+anvil generate --model acestep-v1.5-sft \
+    --prompt "my_style, anthemic rock, live drums, gritty guitars" \
+    --lora my-style \
+    --lora-scale 0.8 \
+    --seconds-total 60
 ```
 
 Batch YAML format — each entry supports `prompt`, `negative_prompt`, `lyrics`,
@@ -463,6 +473,85 @@ audio analysis, tags, negative tags, and confidence. The generated
 
 ---
 
+## ACE-Step LoRA Adapters
+
+Anvil can register and apply ACE-Step LoRA adapters without bundling the
+adapter weights into this repo. Local adapter metadata lives at:
+
+```text
+~/.cache/anvil-audio/lora/adapters/
+```
+
+Import a PEFT LoRA directory or LoKr safetensors file:
+
+```bash
+anvil lora import-local ./lora-runs/my_style/final --name my-style
+```
+
+Import from HuggingFace:
+
+```bash
+anvil lora import-hf username/my-style-acestep-lora --name my-style
+```
+
+List and inspect registered adapters:
+
+```bash
+anvil lora list
+anvil lora info my-style
+```
+
+Use an adapter from the CLI:
+
+```bash
+anvil generate --model acestep-v1.5-sft \
+    --prompt "my_style, polished alternative rock, live drums" \
+    --lora my-style \
+    --lora-scale 0.75 \
+    --seconds-total 60
+```
+
+Use an adapter in Gradio by loading an ACE-Step model, opening the
+**ACE-Step LoRA** accordion, and entering a registered adapter id/name or a
+direct PEFT/LoKr path.
+
+### Training a LoRA
+
+The full automated flow is:
+
+```bash
+# 1. Build reviewable clips and captions
+anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
+    --name my_style \
+    --tracks 12 \
+    --clips 80 \
+    --clip-length 35 \
+    --style-hint "anthemic alternative rock, live drums" \
+    --caption-mode llm
+
+# 2. Convert clips into ACE-Step training tensors
+anvil lora preprocess ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --output-dir ./tensors/my_style \
+    --model-variant sft \
+    --custom-tag my_style
+
+# 3. Train with ACE-Step's corrected training_v2 fixed LoRA trainer
+anvil lora train ./tensors/my_style \
+    --output-dir ./lora-runs/my_style \
+    --model-variant sft \
+    --epochs 20 \
+    --rank 64 \
+    --alpha 128
+
+# 4. Register the final adapter for generation
+anvil lora import-local ./lora-runs/my_style/final --name my-style
+```
+
+`anvil lora train` writes an inference-ready PEFT adapter under
+`<output-dir>/final/`, which ACE-Step can load directly.
+
+---
+
 ## Audio Editor
 
 The Gradio UI includes a built-in **Edit** tab for quick post-processing without
@@ -533,7 +622,7 @@ That's it. Once installed, two new models appear in the registry automatically:
 On first use, Anvil downloads the original HuggingFace weights and converts them to MLX
 safetensors format. Converted weights are cached at:
 
-```
+```text
 ~/.cache/anvil-audio/mlx-weights/<model-slug>/
 ```
 
@@ -630,7 +719,6 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`
 }
 ```
 
-
 Replace `/path/to/anvil-audio-v2` with the absolute path to your clone.
 
 ### Claude Code config
@@ -649,12 +737,11 @@ Add to `~/.claude.json` under `mcpServers`:
 }
 ```
 
-
 ### Example session
 
 Once configured, Claude can generate and edit audio directly:
 
-```
+```text
 You:    Generate a short thunderstorm ambience clip
 Claude: [calls generate_audio(prompt="thunderstorm ambience, rain, distant thunder", duration_seconds=20)]
         Generated: ~/anvil-audio-outputs/default/20260401_181907_thunderstorm_...wav
@@ -767,6 +854,9 @@ load and prints the explicit install command.
 | `--enhance-prompt` | off | Enhance prompt and negative prompt |
 | `--write-lyrics` | off | Write duration-aware ACE-Step lyrics |
 | `--intelligence-model` | default | LLM path or HuggingFace repo |
+| `--lora` | blank | ACE-Step adapter id/name or direct PEFT/LoKr path |
+| `--lora-scale` | `1.0` | ACE-Step adapter strength |
+| `--lora-adapter-name` | blank | Optional runtime adapter name |
 | `--output-dir` | `./output` | Output directory |
 | `--format` | `wav` | `wav`, `flac`, `mp3`, or `ogg` |
 | `--clip-length` | off | Clip to `seconds_total` |
@@ -804,58 +894,26 @@ load and prints the explicit install command.
 
 ---
 
-## Logging
+## `anvil lora` flags
 
-Training requires a [Weights & Biases](https://wandb.ai) account:
-
-```bash
-wandb login
-# or pass as env var
-export WANDB_API_KEY="your-key-here"
-```
-
----
-
-## Training
-
-### Configuration files
-
-You need two config files before starting a training run:
-
-- **model config** — defines architecture and training hyperparameters
-- **dataset config** — points to your audio and metadata
-
-`anvil dataset build-local` and `anvil dataset build-youtube` now write a
-starter `dataset_config.json` automatically. Review the clips and captions, then
-use that generated config as the dataset input for training experiments.
-
-See [docs/datasets.md](docs/datasets.md) for dataset config details.
-
-### Training from scratch
-
-```bash
-python3 train.py \
-    --dataset-config /path/to/dataset/config \
-    --model-config /path/to/model/config \
-    --name my_experiment
-```
-
-### Fine-tuning
-
-- Resume from a wrapped checkpoint: `--ckpt-path path/to/wrapped.ckpt`
-- Start fresh from an unwrapped pre-trained model: `--pretrained-ckpt-path path/to/unwrapped.ckpt`
-
-### Unwrapping a model
-
-Training checkpoints include the full training wrapper (discriminators, EMA, optimizer states).
-Unwrap before using for inference or as a pretransform:
-
-```bash
-python3 unwrap_model.py \
-    --model-config /path/to/model/config \
-    --ckpt-path /path/to/wrapped/ckpt.ckpt \
-    --name /path/to/output/unwrapped_name
-```
+| Command / Flag | Default | Description |
+| --- | --- | --- |
+| `list` | - | List registered adapters |
+| `info REF` | - | Show adapter metadata or resolve a direct path |
+| `import-local PATH` | - | Register a PEFT adapter dir or LoKr safetensors |
+| `import-hf REPO_ID` | - | Download and register a HuggingFace adapter |
+| `write-dataset-json DATASET_DIR` | - | Convert an Anvil dataset to ACE-Step JSON |
+| `preprocess DATASET_DIR` | - | Build ACE-Step `.pt` tensors |
+| `train TENSOR_DIR` | - | Run ACE-Step corrected LoRA training |
+| `--name` | inferred | Adapter display name |
+| `--base-model` | `acestep-v1.5` | Compatibility note for adapter metadata |
+| `--checkpoint-dir` | Anvil ACE-Step cache | ACE-Step checkpoints root |
+| `--model-variant` | `sft` | `turbo`, `base`, `sft`, or custom folder name |
+| `--custom-tag` | blank | Trigger tag prepended during preprocessing |
+| `--output-dir` | required | Tensor or training output directory |
+| `--epochs` | `100` | Training epochs |
+| `--rank` / `--alpha` | `64` / `128` | LoRA rank and alpha |
+| `--dry-run` | off | Print the ACE-Step training command |
 
 ---
 

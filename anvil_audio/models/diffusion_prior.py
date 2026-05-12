@@ -1,5 +1,4 @@
 from enum import Enum
-import typing as tp
 
 import torch
 from torch.nn import functional as F

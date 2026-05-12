@@ -42,7 +42,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .interfaces import BasePipeline
-    from .pipeline import DiffusionPipeline
 
 
 # ---------------------------------------------------------------------------

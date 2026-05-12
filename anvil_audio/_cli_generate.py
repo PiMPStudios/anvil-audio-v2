@@ -140,6 +140,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional local path or HuggingFace repo for prompt/lyric intelligence.",
     )
+    p.add_argument(
+        "--lora",
+        type=str,
+        default="",
+        metavar="NAME_OR_PATH",
+        help=(
+            "ACE-Step only: registered LoRA adapter id/name or direct PEFT/LoKr "
+            "path to apply during generation."
+        ),
+    )
+    p.add_argument(
+        "--lora-scale",
+        type=float,
+        default=1.0,
+        help="ACE-Step only: LoRA strength from 0.0 to 1.0. Default: 1.0.",
+    )
+    p.add_argument(
+        "--lora-adapter-name",
+        type=str,
+        default="",
+        help="ACE-Step only: optional runtime adapter name.",
+    )
 
     # ---- Output ----
     p.add_argument(
@@ -387,6 +409,31 @@ def main() -> None:
     if args.model:
         _entry = registry.get_model(args.model)
         is_acestep = _entry is not None and _entry.pipeline_type == "acestep"
+    lora_metadata: dict[str, Any] = {}
+    if args.lora:
+        if not is_acestep:
+            parser.error("--lora is only supported with ACE-Step registry models.")
+        from anvil_audio.lora import resolve_adapter_reference
+
+        lora_path, lora_entry = resolve_adapter_reference(args.lora)
+        apply_lora = getattr(pipeline, "apply_lora_adapter", None)
+        if not callable(apply_lora):
+            parser.error("selected ACE-Step pipeline does not expose LoRA loading.")
+        lora_status = apply_lora(
+            str(lora_path),
+            adapter_name=args.lora_adapter_name or None,
+            scale=float(args.lora_scale),
+        )
+        lora_metadata = {
+            "lora": {
+                "reference": args.lora,
+                "path": str(lora_path),
+                "scale": float(args.lora_scale),
+                "adapter_name": args.lora_adapter_name or None,
+                "registry_id": lora_entry.id if lora_entry else None,
+                "status": lora_status,
+            }
+        }
 
     batch_window = args.batch_size
 
@@ -530,7 +577,8 @@ def main() -> None:
                     key: conds_i[j][key]
                     for key in ("lyrics", "original_prompt")
                     if conds_i[j].get(key)
-                },
+                }
+                | lora_metadata,
             )
             _output_mgr.write_sidecar(Path(save_path), meta)
 

@@ -13,10 +13,12 @@ keywords = [
     "audio-generation",
     "diffusion",
     "gradio",
+    "lora",
     "mlx",
     "music-generation",
     "pytorch",
     "stable-audio",
+    "training",
 ]
 dependencies = [
     "alias-free-torch>=0.0.6",

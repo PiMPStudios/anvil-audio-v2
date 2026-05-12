@@ -1,75 +1,127 @@
 # Datasets
-`stable-audio-tools` supports loading data from local file storage, as well as loading audio files and JSON files in the [WebDataset](https://github.com/webdataset/webdataset/tree/main/webdataset) format from Amazon S3 buckets.
 
-# Dataset configs
-To specify the dataset used for training, you must provide a dataset config JSON file to `train.py`.
+Anvil has two dataset paths:
 
-The dataset config consists of a `dataset_type` property specifying the type of data loader to use, a `datasets` array to provide multiple data sources, and a `random_crop` property, which decides if the cropped audio from the training samples is from a random place in the audio file, or always from the beginning.
+- `anvil dataset` creates reviewable local clip datasets for LoRA work.
+- The legacy Stable Audio loaders still support `audio_dir` and S3
+  WebDataset configs for older training experiments.
 
-## Local audio files
-To use a local directory of audio samples, set the `dataset_type` property in your dataset config to `"audio_dir"`, and provide a list of objects to the `datasets` property including the `path` property, which should be the path to your directory of audio samples.
+## Anvil LoRA Dataset Builder
 
-This will load all of the compatible audio files from the provided directory and all subdirectories.
+Build a local dataset from audio files:
 
-### Example config 
+```bash
+anvil dataset build-local ./source-audio \
+    --name my_style \
+    --clips 80 \
+    --clip-length 35 \
+    --style-hint "anthemic alternative rock, live drums" \
+    --caption-mode heuristic
+```
+
+Build from an authorized YouTube video, playlist, or channel:
+
+```bash
+anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
+    --name my_channel_style \
+    --tracks 12 \
+    --clips 80 \
+    --clip-length 35 \
+    --caption-mode llm
+```
+
+Only train on material you own or are authorized to train on.
+
+## Output Layout
+
+```text
+datasets/my_style_YYYYMMDD_HHMMSS/
+  clips/
+    clip_0001.wav
+    clip_0001.json
+  captions.json
+  character_sheet.json
+  dataset_manifest.json
+  dataset_config.json
+  sources/
+```
+
+The clip sidecars and `captions.json` contain the prompt/caption, tags,
+negative tags, source metadata, clip timing, and deterministic audio analysis.
+`character_sheet.json` summarizes the dataset style so you can review the
+result before training.
+
+## ACE-Step LoRA Preprocessing
+
+ACE-Step LoRA training needs preprocessed tensor files. Convert an Anvil dataset
+like this:
+
+```bash
+anvil lora preprocess ./datasets/my_style_20260512_140000 \
+    --output-dir ./tensors/my_style \
+    --model-variant sft \
+    --custom-tag my_style
+```
+
+This writes `acestep_dataset.json` into the dataset folder, then delegates to
+ACE-Step's `training_v2` preprocessing pipeline to produce `.pt` tensors.
+
+## Legacy Stable Audio Dataset Config
+
+Some inherited Stable Audio training code still consumes a JSON dataset config.
+`anvil dataset` writes a starter `dataset_config.json` automatically:
+
 ```json
 {
-    "dataset_type": "audio_dir",
-    "datasets": [
-        {
-            "id": "my_audio",
-            "path": "/path/to/audio/dataset/"
-        }
-    ],
-    "random_crop": true
+  "dataset_type": "audio_dir",
+  "datasets": [
+    {
+      "id": "my_style",
+      "path": "/path/to/datasets/my_style/clips"
+    }
+  ],
+  "random_crop": true
 }
 ```
 
-## S3 WebDataset
-To load audio files and related metadata from .tar files in the WebDataset format hosted in Amazon S3 buckets, you can set the `dataset_type` property to `s3`, and provide the `datasets` parameter with a list of objects containing the AWS S3 path to the shared S3 bucket prefix of the WebDataset .tar files. The S3 bucket will be searched recursively given the path, and assumes any .tar files found contain audio files and corresponding JSON files where the related files differ only in file extension (e.g. "000001.flac", "000001.json", "00002.flac", "00002.json", etc.)
+For S3 WebDataset experiments, use:
 
-### Example config
 ```json
 {
-    "dataset_type": "s3",
-    "datasets": [
-        {
-            "id": "s3-test",
-            "s3_path": "s3://my-bucket/datasets/webdataset/audio/"
-        }
-    ],
-    "random_crop": true
+  "dataset_type": "s3",
+  "datasets": [
+    {
+      "id": "s3-test",
+      "s3_path": "s3://my-bucket/datasets/webdataset/audio/"
+    }
+  ],
+  "random_crop": true
 }
 ```
 
-# Custom metadata
-To customize the metadata provided to the conditioners during model training, you can provide a separate custom metadata module to the dataset config. This metadata module should be a Python file that must contain a function called `get_custom_metadata` that takes in two parameters, `info`, and `audio`, and returns a dictionary. 
+## Custom Metadata
 
-For local training, the `info` parameter will contain a few pieces of information about the loaded audio file, such as the path, and information about how the audio was cropped from the original training sample. For WebDataset datasets, it will also contain the metadata from the related JSON files. 
+Legacy Stable Audio training can add a `custom_metadata_module` to the dataset
+config. The module must define `get_custom_metadata(info, audio)` and return a
+dictionary whose values are merged into the training metadata.
 
-The `audio` parameter contains the audio sample that will be passed to the model at training time. This lets you analyze the audio for extra properties that you can then pass in as extra conditioning signals.
-
-The dictionary returned from the `get_custom_metadata` function will have its properties added to the `metadata` object used at training time. For more information on how conditioning works, please see the [Conditioning documentation](./conditioning.md)
-
-## Example config and custom metadata module
 ```json
 {
-    "dataset_type": "audio_dir",
-    "datasets": [
-        {
-            "id": "my_audio",
-            "path": "/path/to/audio/dataset/"
-        }
-    ],
-    "custom_metadata_module": "/path/to/custom_metadata.py",
-    "random_crop": true
+  "dataset_type": "audio_dir",
+  "datasets": [
+    {
+      "id": "my_audio",
+      "path": "/path/to/audio/dataset/"
+    }
+  ],
+  "custom_metadata_module": "/path/to/custom_metadata.py",
+  "random_crop": true
 }
 ```
 
-`custom_metadata.py`:
-```py
+Example module:
+
+```python
 def get_custom_metadata(info, audio):
-
-    # Pass in the relative path of the audio file as the prompt
     return {"prompt": info["relpath"]}
 ```

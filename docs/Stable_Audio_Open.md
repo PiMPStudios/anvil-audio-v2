@@ -10,7 +10,6 @@ To help you smoothly experiment / play with this model,
 I have compiled detailed instructions for running `Stable Audio Open 1.0`,
 along with some information about the model below.
 
-
 # Prerequisites
 
 ## Build an environment
@@ -37,7 +36,6 @@ In my case, the use of an environment variable `HF_TOKEN` was convenient.
 1. Create a HuggingFace token for accessing the weights from https://huggingface.co/settings/tokens.
 2. Set the token to `HF_TOKEN` variable when running your script.
 
-
 # Model details
 
 I extracted the model configuration of `Stable Audio Open 1.0` as with other models in the configuration directory.
@@ -45,6 +43,7 @@ I extracted the model configuration of `Stable Audio Open 1.0` as with other mod
 - [stable_audio_open_1_0.json](../anvil_audio/configs/model_configs/txt2audio/stable_audio_open_1_0.json)
 
 You can see that the main model architecture is exactly the same as **`Stable Audio 2.0`**. However, an interesting difference is that the pretrained encoder used to extract features from text prompts has changed from the CLAP text encoder to **T5 encoder** 🙄🙄.
+
 - Stable Audio 2.0 : CLAP text encoder
 - Stable Audio Open 1.0 : T5 encoder
 
@@ -57,7 +56,7 @@ This repository provides two methods to test out `Stable Audio Open`.
 
 ## 1. Multi-GPU/node generation with YAML input
 
-Instead of generating samples one by one, 
+Instead of generating samples one by one,
 you might want to use GPU power to generate multiple samples in parallel.
 To achieve this, I provide the script [`generate.py`](../generate.py),
 which allows you to input sets of text prompts and other parameters via a YAML file.
@@ -65,9 +64,11 @@ which allows you to input sets of text prompts and other parameters via a YAML f
 ### Prepare YAML condition file
 
 You can specify condition sets, sample names and sub-directories for audio file output as follows.
+
 - YAML example : [generate_conditions.yaml](../example/generation/generate_conditions.yaml)
 
 = generate_conditions.yaml =
+
 ```yaml
 music:
   drum:
@@ -93,7 +94,8 @@ sfx:
 With the above yaml input, the script outputs generated audio files with the following directory structure.
 
 = output directory =
-```
+
+```text
 .
 ├── music/
 │   └── drum/
