@@ -48,7 +48,10 @@ anvil dataset build-local ./source-audio \
 
 `--transcribe-vocals` uses source text and `--style-hint` to decide which clips
 are likely vocal-forward. Use `--transcribe-all` to force transcription for
-every clip. The feature is optional and local-only:
+every clip. The feature is optional and local-only. On Apple Silicon,
+`bash install.sh` installs the lightweight `lightning-whisper-mlx` runtime, and
+the selected Whisper model downloads lazily on first transcription. Manual
+installs can use:
 
 ```bash
 pip install lightning-whisper-mlx  # Apple Silicon

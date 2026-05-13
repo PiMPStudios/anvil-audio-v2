@@ -64,9 +64,10 @@ bash install.sh
 
 The script detects your platform, installs the right PyTorch build, adds
 `pytest` for local verification, installs `yt-dlp` for dataset building,
-enables MLX acceleration and local prompt intelligence on Apple Silicon, and
-optionally installs ACE-Step for music generation — all in one step. No
-separate repo clones required.
+enables MLX acceleration, local prompt intelligence, and the lightweight MLX
+Whisper runtime on Apple Silicon, and optionally installs ACE-Step for music
+generation — all in one step. Whisper model weights are still downloaded lazily
+the first time transcription is used. No separate repo clones required.
 
 ### Windows
 
@@ -88,7 +89,7 @@ pip install .                      # core install
 # Apple Silicon only: MLX acceleration + local intelligence
 pip install mlx-audiogen mlx-lm
 pip install yt-dlp                 # optional: YouTube dataset builder
-pip install lightning-whisper-mlx  # optional: Apple Silicon vocal transcription
+pip install lightning-whisper-mlx  # Apple Silicon vocal transcription runtime
 # or: pip install openai-whisper   # optional: cross-platform local transcription
 pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
 pip install pytest                 # optional: run the local test suite
@@ -468,8 +469,10 @@ anvil dataset build-local ./my-source-audio \
 
 `--transcribe-vocals` only runs on clips whose source title or style hint looks
 vocal-focused. Use `--transcribe-all` when the source metadata is weak and you
-want every clip checked. This is local-only and requires either
-`lightning-whisper-mlx` on Apple Silicon or `openai-whisper`.
+want every clip checked. This is local-only. On Apple Silicon, `install.sh`
+installs the lightweight `lightning-whisper-mlx` runtime and the selected
+Whisper model downloads lazily on first use. Cross-platform manual installs can
+use `openai-whisper` instead.
 
 Before training, run the embedding QA pass to find duplicate captions, semantic
 outliers, weak coverage, and low-confidence clips:

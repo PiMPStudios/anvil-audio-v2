@@ -81,6 +81,7 @@ apple = [
     "anvil-audio[acestep]",
     "anvil-audio[intelligence]",
     "anvil-audio[dataset]",
+    "anvil-audio[mlx-transcription]",
 ]
 cuda = [
     "anvil-audio[acestep]",

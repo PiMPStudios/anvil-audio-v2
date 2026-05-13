@@ -67,6 +67,9 @@ $PIP install yt-dlp --quiet
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo "Installing MLX acceleration and local intelligence tooling..."
     $PIP install mlx-audiogen mlx-lm --quiet
+
+    echo "Installing Apple Silicon vocal transcription tooling..."
+    $PIP install lightning-whisper-mlx --quiet
 fi
 
 # ── ACE-Step (optional music generation) ─────────────────────────────────────
