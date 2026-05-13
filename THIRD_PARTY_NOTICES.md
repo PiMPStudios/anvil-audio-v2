@@ -34,15 +34,15 @@ Anvil.
 ## ACE-Step
 
 **Project:** ACE-Step
-**URL:** https://github.com/ace-step/ACE-Step
+**URL:** https://github.com/ace-step/ACE-Step-1.5
 **Author:** ACE Studio and StepFun
 **License:** Apache 2.0
 
-**Optional dependency.** Not installed by default. When present, Anvil wraps ACE-Step's
+**Optional dependency.** The installer can install ACE-Step from its GitHub package; users
+can also provide a local ACE-Step checkout explicitly. When present, Anvil wraps ACE-Step's
 `AceStepHandler` through the `ACEStepPipeline` adapter (`anvil_audio/pipelines/acestep.py`),
-integrating it into the Anvil registry, CLI batch generation, output manager, and Gradio UI.
-ACE-Step code is imported at runtime from a separately cloned repository — none of its source
-is bundled with Anvil.
+integrating it into the Anvil registry, CLI batch generation, output manager, Gradio UI,
+and LoRA workflow. ACE-Step source is not vendored into this repository.
 
 ---
 
@@ -53,9 +53,10 @@ is bundled with Anvil.
 **Author:** Jason Vassallo
 **License:** Apache 2.0
 
-**Optional dependency.** Not installed by default. Install with `pip install mlx-audiogen`.
-When present on Apple Silicon (M1/M2/M3/M4), Anvil uses mlx-audiogen's `StableAudioPipeline`
-and `convert_stable_audio` via the `MLXDiffusionPipeline` adapter
+**Optional dependency.** `install.sh` installs it on Apple Silicon; manual installs can use
+`pip install mlx-audiogen`. When present on Apple Silicon (M1/M2/M3/M4), Anvil uses
+mlx-audiogen's `StableAudioPipeline` and `convert_stable_audio` via the `MLXDiffusionPipeline`
+adapter
 (`anvil_audio/pipelines/mlx_diffusion.py`) to run Stable Audio inference on Apple's native
 MLX framework. Converted weights are cached locally — no mlx-audiogen source is bundled
 with Anvil.
@@ -85,3 +86,15 @@ not the MIT license that covers Anvil's code.
 
 **Optional / downloaded on demand.** Model weights are not bundled with Anvil. They are
 downloaded from HuggingFace Hub by ACE-Step's `initialize_service` call on first use.
+
+---
+
+## Local prompt and dataset intelligence models
+
+**Projects:** mlx-lm, Llama 3.2 3B Instruct MLX quantizations, Qwen3-Embedding-0.6B,
+and local Whisper runtimes such as lightning-whisper-mlx or openai-whisper.
+
+**Optional / downloaded on demand.** These are used for prompt enhancement, lyric writing,
+dataset caption cleanup, embedding QA, and optional vocal transcription. Runtime packages
+are installed through pip extras or `install.sh`; model weights are cached locally on first
+use and remain governed by their upstream model cards and licenses.

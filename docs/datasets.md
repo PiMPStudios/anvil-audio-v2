@@ -1,5 +1,8 @@
 # Datasets
 
+This is the current Anvil workflow for building reviewable audio datasets and
+turning them into ACE-Step LoRA training inputs.
+
 Anvil has two dataset paths:
 
 - `anvil dataset` creates reviewable local clip datasets for LoRA work.
@@ -143,6 +146,15 @@ On Apple Silicon, add `--basic-loop` if Lightning Fabric hits MPS AMP gradient
 scaler errors before the first optimizer step. Keep preprocessing at
 `--precision fp32`; lower precision can poison the training tensors on the
 Apple path.
+
+Once the final adapter exists, register it with:
+
+```bash
+anvil lora import-local ./lora-runs/my_style/final --name my-style
+```
+
+After import, select it in Gradio under the **ACE-Step LoRA** accordion or pass
+it to `anvil generate --lora my-style`.
 
 ## Legacy Stable Audio Dataset Config
 

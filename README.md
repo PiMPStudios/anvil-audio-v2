@@ -23,7 +23,8 @@ registry, CLI, and Gradio UI.
 - **Output management** — collision-free timestamped filenames, JSON metadata sidecars with `generation_duration_seconds`, batch manifests, and project-scoped folders under `~/anvil-audio-outputs/`.
 - **MPS / CUDA / CPU auto-detection** — runs on Apple Silicon, NVIDIA GPUs, or CPU with no flags needed.
 - **`anvil generate` CLI** — multi-GPU via Accelerate, wav/flac/mp3/ogg output, batch YAML conditions, per-run seed control; `anvil --list-models` works at the top level.
-- **Gradio web UI** — project name, seed input, live metadata panel, model dropdown with hot-reload, device field.
+- **Gradio web UI** — project name, seed input, live metadata panel, model
+  dropdown with hot-reload, device field, and runtime theme presets.
 - **Built-in audio editor** — post-processing tab with normalize, trim, fade, time stretch, pitch shift, EQ, and reverb; non-destructive exports with full effects sidecar.
 - **Local prompt intelligence** — optional MLX Llama prompt enhancement,
   negative-prompt suggestions, and duration-aware lyric writing on Apple
@@ -106,6 +107,22 @@ anvil setup
 
 ---
 
+## Documentation
+
+- [Dataset and LoRA workflow](docs/datasets.md) covers local/YouTube dataset
+  creation, vocal transcription, Qwen embedding QA, ACE-Step preprocessing, and
+  training.
+- [Stable Audio Open notes](docs/Stable_Audio_Open.md) cover the inherited
+  Stable Audio Open 1.0 generation scripts and HuggingFace access notes.
+- [Model internals](docs/diffusion.md), [conditioning](docs/conditioning.md),
+  [autoencoders](docs/autoencoders.md), and [pretransforms](docs/pretransforms.md)
+  are inherited Stable Audio technical references for people changing model
+  architecture or training code.
+- [Third-party notices](THIRD_PARTY_NOTICES.md) lists upstream code and model
+  dependencies.
+
+---
+
 ## Quick Start
 
 The fastest path to generating audio:
@@ -180,8 +197,8 @@ ACE-Step is **optional**. If you don't install it, all other Anvil functionality
 
 ACE-Step ships a separate 5 Hz LM that produces structured `audio_codes` fed
 into the DiT. Anvil can initialise that LM automatically, but the built-in SFT
-entry defaults to the direct DiT conditioning path used by AnvilApp because that
-path is the known-good local baseline for blank-lyrics SFT generation.
+entry defaults to the direct DiT conditioning path because that is the
+known-good local baseline for blank-lyrics SFT generation.
 
 Anvil initialises the LM automatically using the checkpoint specified in the registry
 entry. The built-in entries default to:
@@ -235,9 +252,9 @@ weights under `~/.cache/anvil-audio/acestep/checkpoints`:
 | `acestep-v1.5-sft` | Full quality | 50 | Direct DiT conditioning, guidance 7.5, shift 3.0, experimental DCW off |
 
 The SFT built-in intentionally disables ACE-Step's experimental DCW sampler
-correction and LM thinking by default. That matches AnvilApp's known-good
-MLX-Swift path for blank-lyrics SFT generation; enable those options explicitly
-only when you want to experiment with ACE-Step's LM/code-hint path.
+correction and LM thinking by default. Keep those options disabled for the
+normal SFT path; enable them explicitly only when you want to experiment with
+ACE-Step's LM/code-hint path.
 
 ### Optional XL checkpoints
 
@@ -378,14 +395,8 @@ separate DiT negative-prompt control.
 
 On Apple Silicon, Anvil can use a local MLX Llama model to enhance prompts,
 suggest negative prompts, and write duration-aware lyrics. The default model is
-`mlx-community/Llama-3.2-3B-Instruct-4bit`, the same local model family used by
-AnvilApp. If AnvilApp already has it downloaded, this repo reuses:
-
-```text
-~/Library/Application Support/Anvil/LLM/llama-3.2-3b-instruct-4bit/
-```
-
-Otherwise, first use downloads the model into:
+`mlx-community/Llama-3.2-3B-Instruct-4bit`. First use downloads the model into
+Anvil Audio's local cache:
 
 ```text
 ~/.cache/anvil-audio/llm/llama-3.2-3b-instruct-4bit/
@@ -549,6 +560,10 @@ Use an adapter in Gradio by loading an ACE-Step model, opening the
 **ACE-Step LoRA** accordion, and entering a registered adapter id/name or a
 direct PEFT/LoKr path.
 
+Anvil does not scan other applications for adapters. Keep this repo's LoRA path
+explicit: train an adapter here, import a local PEFT/LoKr folder, or import a
+standard HuggingFace adapter repo when you have one you want to use.
+
 ### Training a LoRA
 
 The full automated flow is:
@@ -592,6 +607,27 @@ On Apple Silicon, add `--basic-loop` if Lightning Fabric fails with MPS AMP
 gradient-scaler errors. This uses ACE-Step's own non-Fabric training loop.
 Keep preprocessing at `--precision fp32`; lower precision can produce non-finite
 conditioning tensors on the Apple path.
+
+---
+
+## Troubleshooting
+
+`anvil setup` is the first thing to run when something looks off. It reports
+whether ACE-Step, MLX Stable Audio, local prompt intelligence, and MLX vocal
+transcription are importable in the current virtual environment.
+
+Common startup warnings:
+
+- `bitsandbytes not installed. Using standard AdamW.` is expected on macOS and
+  only affects optimizer selection for training.
+- `torchao` compatibility warnings can be ignored unless you are actively using
+  ACE-Step quantization.
+- `mx.metal.device_info is deprecated` is an upstream MLX warning and does not
+  indicate failed generation.
+
+If an XL model refuses to load, install the checkpoint explicitly with
+`acestep-download --dir "$HOME/.cache/anvil-audio/acestep/checkpoints" --model <checkpoint>`.
+Anvil blocks surprise XL downloads because those checkpoints are large.
 
 ---
 
@@ -991,7 +1027,6 @@ singularity build anvil-audio.sif docker-daemon://anvil-audio
 - [ ] PyPI package (`pip install anvil-audio`)
 - [ ] Contribution guidelines
 - [ ] More audio augmentations
-- [ ] Troubleshooting section
 
 ---
 

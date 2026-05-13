@@ -6,15 +6,16 @@ Stability AI has finally released the pretrained model weights for `Stable Audio
 
 - Official release : [Introducing Stable Audio Open](https://stability.ai/news/introducing-stable-audio-open)
 
-To help you smoothly experiment / play with this model,
-I have compiled detailed instructions for running `Stable Audio Open 1.0`,
-along with some information about the model below.
+These inherited notes explain how to run `Stable Audio Open 1.0` directly with
+the legacy generation scripts. For the normal Anvil workflow, start with the
+root [README](../README.md) and use the model registry or Gradio UI.
 
 # Prerequisites
 
 ## Build an environment
 
-To install dependencies and build an environment for this (anvil-audio) repository, please follow the instruction in [README](../README.md).
+To install dependencies and build an environment for Anvil Audio v2, follow the
+instructions in the root [README](../README.md).
 
 ## Authentication of HuggingFace
 
@@ -38,7 +39,8 @@ In my case, the use of an environment variable `HF_TOKEN` was convenient.
 
 # Model details
 
-I extracted the model configuration of `Stable Audio Open 1.0` as with other models in the configuration directory.
+The model configuration for `Stable Audio Open 1.0` lives in the configuration
+directory.
 
 - [stable_audio_open_1_0.json](../anvil_audio/configs/model_configs/txt2audio/stable_audio_open_1_0.json)
 
