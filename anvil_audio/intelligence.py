@@ -76,8 +76,9 @@ class LyricWritingPlan:
                 duration_seconds=seconds,
                 line_budget="6 to 10 total lyric lines",
                 section_plan=(
-                    "Use [Verse] and [Chorus]. Keep each section short. "
-                    "Do not use [Bridge]."
+                    "Use exactly these section markers in this order: "
+                    "[Verse 1], [Chorus]. Keep each section short. Do not use "
+                    "[Bridge]."
                 ),
                 max_tokens=140,
                 max_lyric_lines=10,
@@ -87,8 +88,9 @@ class LyricWritingPlan:
                 duration_seconds=seconds,
                 line_budget="10 to 14 total lyric lines",
                 section_plan=(
-                    "Use [Verse], [Chorus], and optional [Verse 2]. Do not use "
-                    "[Bridge] unless it replaces [Verse 2]."
+                    "Use exactly these section markers in this order: "
+                    "[Verse 1], [Chorus], optional [Verse 2]. Do not use [Bridge] "
+                    "unless it replaces [Verse 2]."
                 ),
                 max_tokens=200,
                 max_lyric_lines=14,
@@ -98,8 +100,9 @@ class LyricWritingPlan:
                 duration_seconds=seconds,
                 line_budget="14 to 20 total lyric lines",
                 section_plan=(
-                    "Use [Verse 1], [Chorus], [Verse 2], [Chorus], and optional "
-                    "[Bridge]. Keep the bridge to 2 lines."
+                    "Use exactly these section markers in this order: "
+                    "[Verse 1], [Chorus], [Verse 2], [Chorus], optional [Bridge]. "
+                    "Keep the bridge to 2 lines."
                 ),
                 max_tokens=300,
                 max_lyric_lines=20,
@@ -108,8 +111,9 @@ class LyricWritingPlan:
             duration_seconds=seconds,
             line_budget="20 to 32 total lyric lines",
             section_plan=(
-                "Use a full song structure, but keep sections compact and avoid "
-                "repeated filler."
+                "Use exactly these section markers in this order: [Verse 1], "
+                "[Chorus], [Verse 2], [Chorus], [Bridge], optional [Outro]. "
+                "Keep sections compact and avoid repeated filler."
             ),
             max_tokens=420,
             max_lyric_lines=32,
@@ -128,9 +132,17 @@ class LyricWritingPlan:
             "backing track, write only a sparse chant or hook instead of a full "
             "vocal song.\n"
             "Prefer short concrete phrases over long narrative lines.\n"
+            "Use specific, genre-aware images that feel grounded in the song "
+            "description. Avoid default lyric cliches like shadows, darkness, "
+            "light, fire, rain, broken hearts, and finding my way unless the "
+            "user specifically asks for them.\n"
             "End on a complete line. Never trail off mid-sentence.\n"
-            "Output only lyrics with section markers. No commentary, no chord "
-            "notes, and no parenthetical performance directions."
+            "The first non-empty character of your answer must be '['.\n"
+            "Every requested section marker must appear on its own line. Do not "
+            "collapse the whole song into one [Verse].\n"
+            "Do not put more than 6 lyric lines under a single section marker.\n"
+            "Output only section markers and singable lyric lines. No commentary, "
+            "no chord notes, and no parenthetical performance directions."
         )
 
     def user_prompt(self, prompt: str, style: str = "") -> str:
@@ -284,7 +296,11 @@ def write_lyrics(
         max_tokens=plan.max_tokens,
         temperature=0.8,
     )
-    return _clean_lyrics(text, max_lyric_lines=plan.max_lyric_lines)
+    return _clean_lyrics(
+        text,
+        max_lyric_lines=plan.max_lyric_lines,
+        target_duration_seconds=plan.duration_seconds,
+    )
 
 
 def prepare_song_prompt(
@@ -670,7 +686,11 @@ def _dedupe_tags(tags: list[str]) -> str:
     return ", ".join(clean_tags)
 
 
-def _clean_lyrics(text: str, max_lyric_lines: int | None = None) -> str:
+def _clean_lyrics(
+    text: str,
+    max_lyric_lines: int | None = None,
+    target_duration_seconds: int | None = None,
+) -> str:
     text = _strip_wrapping(text)
     lines = [
         line.rstrip()
@@ -683,6 +703,7 @@ def _clean_lyrics(text: str, max_lyric_lines: int | None = None) -> str:
         lines.pop()
     if max_lyric_lines is not None:
         lines = _limit_lyric_lines(lines, max_lyric_lines)
+    lines = _repair_oversized_single_verse(lines, target_duration_seconds)
     return "\n".join(lines).strip()
 
 
@@ -708,6 +729,102 @@ def _limit_lyric_lines(lines: list[str], max_lyric_lines: int) -> list[str]:
     while limited and (not limited[-1].strip() or re.fullmatch(r"\[[^\]]+\]", limited[-1].strip())):
         limited.pop()
     return limited
+
+
+def _repair_oversized_single_verse(
+    lines: list[str], target_duration_seconds: int | None
+) -> list[str]:
+    non_blank_lines = [line for line in lines if line.strip()]
+    section_markers = [line.strip() for line in non_blank_lines if _is_section_marker(line)]
+    if len(section_markers) != 1 or not _is_generic_verse_marker(section_markers[0]):
+        return lines
+
+    lyric_lines = [line for line in non_blank_lines if not _is_section_marker(line)]
+    threshold = _oversized_verse_threshold(target_duration_seconds)
+    if len(lyric_lines) < threshold:
+        return lines
+
+    markers = _repair_section_markers(target_duration_seconds, len(lyric_lines))
+    if len(markers) <= 1:
+        return lines
+
+    repaired: list[str] = []
+    lyric_index = 0
+    base_count = len(lyric_lines) // len(markers)
+    extra_count = len(lyric_lines) % len(markers)
+    for marker_index, marker in enumerate(markers):
+        if repaired and repaired[-1] != "":
+            repaired.append("")
+        repaired.append(marker)
+        section_line_count = base_count + (1 if marker_index < extra_count else 0)
+        for _ in range(section_line_count):
+            if lyric_index >= len(lyric_lines):
+                break
+            repaired.append(lyric_lines[lyric_index])
+            lyric_index += 1
+
+    return _collapse_blank_lines(repaired)
+
+
+def _is_section_marker(line: str) -> bool:
+    return bool(re.fullmatch(r"\[[^\]]+\]", line.strip()))
+
+
+def _is_generic_verse_marker(line: str) -> bool:
+    normalized = line.strip().lower()
+    return normalized in {"[verse]", "[verse 1]"}
+
+
+def _oversized_verse_threshold(target_duration_seconds: int | None) -> int:
+    if target_duration_seconds is None:
+        return 16
+    if target_duration_seconds < 60:
+        return 10
+    if target_duration_seconds < 90:
+        return 12
+    if target_duration_seconds < 150:
+        return 14
+    return 12
+
+
+def _repair_section_markers(
+    target_duration_seconds: int | None, lyric_line_count: int
+) -> list[str]:
+    if (target_duration_seconds or 0) >= 150 or lyric_line_count >= 16:
+        if lyric_line_count >= 28:
+            return [
+                "[Verse 1]",
+                "[Chorus]",
+                "[Verse 2]",
+                "[Chorus]",
+                "[Bridge]",
+                "[Chorus]",
+                "[Outro]",
+            ]
+        if lyric_line_count >= 22:
+            return [
+                "[Verse 1]",
+                "[Chorus]",
+                "[Verse 2]",
+                "[Chorus]",
+                "[Bridge]",
+                "[Chorus]",
+            ]
+        return ["[Verse 1]", "[Chorus]", "[Verse 2]", "[Chorus]", "[Bridge]"]
+
+    if (target_duration_seconds or 0) >= 90 or lyric_line_count >= 10:
+        return ["[Verse 1]", "[Chorus]", "[Verse 2]", "[Chorus]"]
+
+    return ["[Verse 1]", "[Chorus]"]
+
+
+def _collapse_blank_lines(lines: list[str]) -> list[str]:
+    collapsed: list[str] = []
+    for line in lines:
+        if line == "" and collapsed and collapsed[-1] == "":
+            continue
+        collapsed.append(line)
+    return collapsed
 
 
 def _default_negative_prompt(mode: str) -> str:

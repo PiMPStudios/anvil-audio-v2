@@ -177,6 +177,44 @@ def test_lyric_plan_scales_with_duration():
     assert "4 to 6" in short.line_budget
     assert long.max_tokens == 420
     assert "20 to 32" in long.line_budget
+    assert "[Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge]" in long.section_plan
+
+
+def test_write_lyrics_prompt_discourages_generic_cliches():
+    llm = FakeLLM(["[Verse 1]\nNeon sign above the laundromat\n[Chorus]\nYour coat still smells like smoke"])
+
+    intelligence.write_lyrics("dark blues", duration_seconds=200, llm=llm)
+
+    system_prompt = llm.calls[0]["system_prompt"]
+    assert "Avoid default lyric cliches" in system_prompt
+    assert "Do not collapse the whole song into one [Verse]" in system_prompt
+    assert "Do not put more than 6 lyric lines" in system_prompt
+
+
+def test_write_lyrics_repairs_oversized_single_verse_for_long_songs():
+    llm = FakeLLM(
+        [
+            "\n".join(
+                ["[Verse]"]
+                + [
+                    f"Concrete lyric line {index}"
+                    for index in range(1, 19)
+                ]
+            )
+        ]
+    )
+
+    lyrics = intelligence.write_lyrics(
+        "slow dark blues, smoky barroom vocal",
+        duration_seconds=200,
+        llm=llm,
+    )
+
+    assert lyrics.startswith("[Verse 1]\nConcrete lyric line 1")
+    assert "[Chorus]" in lyrics
+    assert "[Verse 2]" in lyrics
+    assert "[Bridge]" in lyrics
+    assert "\n[Verse]\n" not in lyrics
 
 
 def test_default_model_alias_prefers_existing_anvilapp_download(monkeypatch, tmp_path):
