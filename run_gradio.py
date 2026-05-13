@@ -136,6 +136,7 @@ def main(args: argparse.Namespace) -> None:
         share=args.share,
         auth=(args.username, args.password) if args.username is not None else None,
         allowed_paths=[output_root],
+        css=getattr(interface, "_anvil_custom_theme_css", None),
     )
 
 

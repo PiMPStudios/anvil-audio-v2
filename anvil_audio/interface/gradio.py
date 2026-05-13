@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import gc
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -56,11 +57,137 @@ _last_generated_path: str = ""  # path of the most recently generated file
 sample_rate: int = 32000
 sample_size: int = 1920000
 
+_THEME_DEFAULT_VALUE = "anvil-default"
+_THEME_CSS_ATTR = "_anvil_custom_theme_css"
+_THEME_BUILTIN_CLASSES = {
+    "ocean": "Ocean",
+    "citrus": "Citrus",
+    "glass": "Glass",
+    "monochrome": "Monochrome",
+}
+_THEME_HUB_REPOS = {
+    "terminal": "hmb/terminal",
+    "shiki": "Respair/Shiki",
+    "minecraft": "YTheme/Minecraft",
+    "sketch": "gstaff/sketch",
+}
+_THEME_PRESETS: tuple[tuple[str, str, str], ...] = (
+    (_THEME_DEFAULT_VALUE, "Anvil Default", "Use Gradio's standard theme controls."),
+    ("ocean", "Ocean", "Emerald and blue, clean and spacious."),
+    ("citrus", "Citrus", "Warm amber accents with high contrast."),
+    ("glass", "Glass", "Cool translucent blue/gray surface treatment."),
+    ("monochrome", "Monochrome", "Neutral, minimal, studio-console feel."),
+    ("terminal", "Terminal", "CRT-inspired terminal styling from hmb/terminal."),
+    ("shiki", "Shiki", "Warm Japanese paper-and-ink palette from Respair/Shiki."),
+    ("minecraft", "Minecraft", "Blocky pixel-game styling from YTheme/Minecraft."),
+    ("sketch", "Sketch", "Hand-drawn notebook styling from gstaff/sketch."),
+)
+_THEME_DESCRIPTION_JSON = json.dumps(
+    {theme_id: description for theme_id, _label, description in _THEME_PRESETS},
+    sort_keys=True,
+)
+
+_THEME_APPLY_JS = """
+(theme) => {
+  const descriptions = __THEME_DESCRIPTIONS__;
+  const selected = theme || "anvil-default";
+  if (selected === "anvil-default") {
+    document.documentElement.removeAttribute("data-anvil-theme");
+  } else {
+    document.documentElement.setAttribute("data-anvil-theme", selected);
+  }
+  window.localStorage.setItem("anvil_audio_theme", selected);
+  return [selected, descriptions[selected] || descriptions["anvil-default"]];
+}
+""".replace("__THEME_DESCRIPTIONS__", _THEME_DESCRIPTION_JSON)
+
+_THEME_LOAD_JS = """
+() => {
+  const descriptions = __THEME_DESCRIPTIONS__;
+  const selected = window.localStorage.getItem("anvil_audio_theme") || "anvil-default";
+  if (selected === "anvil-default") {
+    document.documentElement.removeAttribute("data-anvil-theme");
+  } else {
+    document.documentElement.setAttribute("data-anvil-theme", selected);
+  }
+  return [selected, descriptions[selected] || descriptions["anvil-default"]];
+}
+""".replace("__THEME_DESCRIPTIONS__", _THEME_DESCRIPTION_JSON)
+
 
 def _get_pipeline() -> DiffusionPipeline:
     if _pipeline is None:
         raise RuntimeError("No model loaded.  Call load_model() first.")
     return _pipeline
+
+
+def _theme_cache_root() -> Path:
+    return Path.home() / ".cache" / "anvil-audio" / "gradio-themes"
+
+
+def _scope_theme_css(theme_id: str, css: str) -> str:
+    css = css.replace(":root .dark", f'html[data-anvil-theme="{theme_id}"] .dark')
+    return css.replace(":root", f'html[data-anvil-theme="{theme_id}"]')
+
+
+def _load_hub_theme_css(repo_name: str) -> str:
+    import gradio as gr
+
+    return gr.themes.ThemeClass.from_hub(repo_name)._get_theme_css()
+
+
+def _get_hub_theme_css(theme_id: str, repo_name: str) -> str:
+    cache_path = _theme_cache_root() / f"{theme_id}.css"
+    if cache_path.exists():
+        try:
+            return cache_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+
+    css = _load_hub_theme_css(repo_name)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(css, encoding="utf-8")
+    return css
+
+
+def _build_custom_theme_css() -> str:
+    """Return CSS for bundled runtime theme presets."""
+    import gradio as gr
+
+    chunks = [
+        """
+html[data-anvil-theme] .anvil-theme-picker {
+  border-color: var(--border-color-accent);
+}
+"""
+    ]
+    for theme_id, theme_cls_name in _THEME_BUILTIN_CLASSES.items():
+        theme_cls = getattr(gr.themes, theme_cls_name)
+        css = theme_cls()._get_theme_css()
+        chunks.append(_scope_theme_css(theme_id, css))
+    for theme_id, repo_name in _THEME_HUB_REPOS.items():
+        try:
+            css = _get_hub_theme_css(theme_id, repo_name)
+        except Exception as exc:
+            warnings.warn(
+                f"Could not load Gradio theme {repo_name}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+        chunks.append(_scope_theme_css(theme_id, css))
+    return "\n".join(chunks)
+
+
+def _theme_dropdown_choices() -> list[tuple[str, str]]:
+    return [(label, value) for value, label, _description in _THEME_PRESETS]
+
+
+def _theme_markdown(value: str) -> str:
+    descriptions = {
+        theme_id: description for theme_id, _label, description in _THEME_PRESETS
+    }
+    return descriptions.get(value, descriptions[_THEME_DEFAULT_VALUE])
 
 
 # ---------------------------------------------------------------------------
@@ -2402,6 +2529,8 @@ def create_ui(
         else (pretrained_name if pretrained_name in registered_models else None)
     )
 
+    custom_theme_css = _build_custom_theme_css()
+
     with gr.Blocks(title="Stable Audio Tools") as interface:
         # ---- Global controls (outside tabs) ----
         with gr.Row():
@@ -2436,6 +2565,32 @@ def create_ui(
             value=initial_status,
             interactive=False,
         )
+
+        with gr.Accordion("Appearance", open=True):
+            with gr.Row():
+                theme_dropdown = gr.Dropdown(
+                    choices=_theme_dropdown_choices(),
+                    value=_THEME_DEFAULT_VALUE,
+                    label="Theme preset",
+                    info="Runtime theme accents inspired by Gradio's bundled themes. The built-in system/light/dark setting still controls brightness.",
+                    elem_classes=["anvil-theme-picker"],
+                    scale=2,
+                )
+                theme_status = gr.Markdown(_theme_markdown(_THEME_DEFAULT_VALUE))
+
+            theme_dropdown.change(
+                fn=None,
+                inputs=[theme_dropdown],
+                outputs=[theme_dropdown, theme_status],
+                js=_THEME_APPLY_JS,
+                show_progress="hidden",
+            )
+            interface.load(
+                fn=None,
+                outputs=[theme_dropdown, theme_status],
+                js=_THEME_LOAD_JS,
+                show_progress="hidden",
+            )
 
         gr.Markdown("---")
 
@@ -2537,4 +2692,5 @@ def create_ui(
                 outputs=[model_status],
             )
 
+    setattr(interface, _THEME_CSS_ATTR, custom_theme_css)
     return interface
