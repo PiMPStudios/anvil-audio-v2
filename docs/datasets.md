@@ -51,6 +51,35 @@ negative tags, source metadata, clip timing, and deterministic audio analysis.
 `character_sheet.json` summarizes the dataset style so you can review the
 result before training.
 
+## Embedding QA
+
+Run a caption-embedding QA pass before LoRA preprocessing:
+
+```bash
+anvil dataset qa ./datasets/my_style_YYYYMMDD_HHMMSS
+```
+
+This uses `Qwen3-Embedding-0.6B` to cluster captions, flag near duplicates,
+surface semantic outliers, list low-confidence captions, and write both
+`dataset_qa_report.json` and `dataset_qa_report.md` into the dataset folder.
+The default model resolution prefers the Anvil ACE-Step checkpoint cache at
+`~/.cache/anvil-audio/acestep/checkpoints/Qwen3-Embedding-0.6B`, then falls
+back to `Qwen/Qwen3-Embedding-0.6B` on HuggingFace.
+
+Useful options:
+
+```bash
+anvil dataset qa ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --duplicate-threshold 0.9 \
+    --cluster-threshold 0.78 \
+    --outlier-threshold 0.55 \
+    --device auto
+```
+
+Treat this report as a review aid, not an automatic delete list. Outliers are
+often exactly what you want if the adapter is supposed to cover multiple
+substyles.
+
 ## ACE-Step LoRA Preprocessing
 
 ACE-Step LoRA training needs preprocessed tensor files. Convert an Anvil dataset

@@ -13,6 +13,11 @@ from anvil_audio.dataset_builder import (
     build_local_dataset,
     build_youtube_dataset,
 )
+from anvil_audio.dataset_qa import (
+    DEFAULT_EMBEDDING_INSTRUCTION,
+    DatasetQAConfig,
+    run_dataset_qa,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,12 +56,123 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pass --quiet to yt-dlp.",
     )
     _add_common_build_args(youtube)
+
+    qa = subparsers.add_parser(
+        "qa",
+        help="Run Qwen embedding QA against a built dataset's captions.",
+    )
+    qa.add_argument("dataset_dir", help="Directory produced by `anvil dataset`.")
+    qa.add_argument(
+        "--embedding-model",
+        default=None,
+        help=(
+            "Embedding model path or HuggingFace repo. Default: local "
+            "Qwen3-Embedding-0.6B cache when present, otherwise "
+            "Qwen/Qwen3-Embedding-0.6B."
+        ),
+    )
+    qa.add_argument(
+        "--device",
+        default="auto",
+        help="Embedding device: auto, cuda, mps, or cpu. Default: auto.",
+    )
+    qa.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Embedding batch size. Default: 8.",
+    )
+    qa.add_argument(
+        "--max-length",
+        type=int,
+        default=512,
+        help="Max tokenizer length for captions. Default: 512.",
+    )
+    qa.add_argument(
+        "--output",
+        default=None,
+        help="Output JSON report path. Default: DATASET_DIR/dataset_qa_report.json.",
+    )
+    qa.add_argument(
+        "--markdown-output",
+        default=None,
+        help="Output Markdown report path. Default: DATASET_DIR/dataset_qa_report.md.",
+    )
+    qa.add_argument(
+        "--no-markdown",
+        action="store_true",
+        help="Only write the JSON report.",
+    )
+    qa.add_argument(
+        "--duplicate-threshold",
+        type=float,
+        default=0.9,
+        help="Cosine similarity threshold for duplicate pairs. Default: 0.9.",
+    )
+    qa.add_argument(
+        "--cluster-threshold",
+        type=float,
+        default=0.78,
+        help="Cosine similarity threshold used to group clusters. Default: 0.78.",
+    )
+    qa.add_argument(
+        "--outlier-threshold",
+        type=float,
+        default=0.55,
+        help="Mean neighbor similarity below which a clip is an outlier. Default: 0.55.",
+    )
+    qa.add_argument(
+        "--nearest-neighbors",
+        type=int,
+        default=5,
+        help="Neighbor count used for outlier scoring. Default: 5.",
+    )
+    qa.add_argument(
+        "--low-confidence-threshold",
+        type=float,
+        default=0.45,
+        help="Caption confidence below which clips are flagged. Default: 0.45.",
+    )
+    qa.add_argument(
+        "--instruction",
+        default=DEFAULT_EMBEDDING_INSTRUCTION,
+        help="Optional instruction prefix used for Qwen caption embeddings.",
+    )
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.command == "qa":
+        try:
+            result = run_dataset_qa(
+                DatasetQAConfig(
+                    dataset_dir=Path(args.dataset_dir),
+                    output_json=Path(args.output) if args.output else None,
+                    output_markdown=(
+                        Path(args.markdown_output) if args.markdown_output else None
+                    ),
+                    write_markdown=not args.no_markdown,
+                    embedding_model=args.embedding_model,
+                    device=args.device,
+                    batch_size=args.batch_size,
+                    max_length=args.max_length,
+                    duplicate_threshold=args.duplicate_threshold,
+                    cluster_threshold=args.cluster_threshold,
+                    outlier_threshold=args.outlier_threshold,
+                    nearest_neighbors=args.nearest_neighbors,
+                    low_confidence_threshold=args.low_confidence_threshold,
+                    instruction=args.instruction,
+                )
+            )
+        except Exception as exc:
+            print(f"dataset QA failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_qa_result(result.report, result.json_path, result.markdown_path)
+        return
+
     output_dir = (
         Path(args.output_dir) if args.output_dir else _default_output_dir(args.name)
     )
@@ -93,6 +209,24 @@ def main() -> None:
     print(f"Captions: {result.captions_path}")
     print(f"Character sheet: {result.character_sheet_path}")
     print(f"Training dataset config: {result.dataset_config_path}")
+
+
+def _print_qa_result(
+    report: dict, json_path: Path, markdown_path: Path | None
+) -> None:
+    summary = report["summary"]
+    print(f"Dataset QA report: {json_path}")
+    if markdown_path is not None:
+        print(f"Markdown report: {markdown_path}")
+    print(
+        "Summary: "
+        f"{summary['cluster_count']} clusters, "
+        f"{summary['duplicate_pair_count']} duplicate pairs, "
+        f"{summary['outlier_count']} outliers, "
+        f"{summary['low_confidence_count']} low-confidence captions"
+    )
+    for recommendation in report["recommendations"]:
+        print(f"- {recommendation}")
 
 
 def _add_common_build_args(parser: argparse.ArgumentParser) -> None:

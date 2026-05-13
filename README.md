@@ -452,6 +452,18 @@ the same local MLX Llama intelligence model as prompt enhancement to polish each
 caption and the final character sheet. Both modes keep the generated metadata
 editable so bad clips or captions can be removed before training.
 
+Before training, run the embedding QA pass to find duplicate captions, semantic
+outliers, weak coverage, and low-confidence clips:
+
+```bash
+anvil dataset qa ./datasets/my_channel_style_YYYYMMDD_HHMMSS
+```
+
+This uses the local `Qwen3-Embedding-0.6B` checkpoint from the Anvil ACE-Step
+cache when present, otherwise `Qwen/Qwen3-Embedding-0.6B` from HuggingFace. It
+writes `dataset_qa_report.json` and `dataset_qa_report.md` in the dataset
+folder so you can prune or recaption clips before LoRA training.
+
 Output layout:
 
 ```text
@@ -529,14 +541,17 @@ anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
     --style-hint "anthemic alternative rock, live drums" \
     --caption-mode llm
 
-# 2. Convert clips into ACE-Step training tensors
+# 2. Review duplicate captions, semantic outliers, and low-confidence clips
+anvil dataset qa ./datasets/my_style_YYYYMMDD_HHMMSS
+
+# 3. Convert clips into ACE-Step training tensors
 anvil lora preprocess ./datasets/my_style_YYYYMMDD_HHMMSS \
     --output-dir ./tensors/my_style \
     --model-variant sft \
     --precision fp32 \
     --custom-tag my_style
 
-# 3. Train with ACE-Step's corrected training_v2 fixed LoRA trainer
+# 4. Train with ACE-Step's corrected training_v2 fixed LoRA trainer
 anvil lora train ./tensors/my_style \
     --output-dir ./lora-runs/my_style \
     --model-variant sft \
@@ -544,7 +559,7 @@ anvil lora train ./tensors/my_style \
     --rank 64 \
     --alpha 128
 
-# 4. Register the final adapter for generation
+# 5. Register the final adapter for generation
 anvil lora import-local ./lora-runs/my_style/final --name my-style
 ```
 
@@ -883,6 +898,7 @@ load and prints the explicit install command.
 | --- | --- | --- |
 | `build-local SOURCE_DIR` | - | Build from a folder of audio files |
 | `build-youtube URL` | - | Download authorized YouTube audio with `yt-dlp` |
+| `qa DATASET_DIR` | - | Run Qwen embedding QA on captions |
 | `--name` | `anvil_dataset` | Dataset name in manifests |
 | `--output-dir` | timestamped `./datasets/...` | Output dataset directory |
 | `--clips` | `40` | Maximum clips to write |
@@ -897,6 +913,10 @@ load and prints the explicit install command.
 | `--tracks` | unlimited | YouTube-only max source videos/tracks |
 | `--delete-downloads` | off | Delete raw downloads after clips are written |
 | `--quiet-ytdlp` | off | Pass `--quiet` to `yt-dlp` |
+| `--embedding-model` | local Qwen cache | QA-only embedding model path/repo |
+| `--duplicate-threshold` | `0.9` | QA-only duplicate similarity cutoff |
+| `--cluster-threshold` | `0.78` | QA-only cluster similarity cutoff |
+| `--outlier-threshold` | `0.55` | QA-only outlier neighbor cutoff |
 
 ---
 
