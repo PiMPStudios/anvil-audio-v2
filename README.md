@@ -88,6 +88,8 @@ pip install .                      # core install
 # Apple Silicon only: MLX acceleration + local intelligence
 pip install mlx-audiogen mlx-lm
 pip install yt-dlp                 # optional: YouTube dataset builder
+pip install lightning-whisper-mlx  # optional: Apple Silicon vocal transcription
+# or: pip install openai-whisper   # optional: cross-platform local transcription
 pip install 'anvil-audio[acestep]' # optional: ACE-Step music generation
 pip install pytest                 # optional: run the local test suite
 ```
@@ -451,6 +453,23 @@ anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
 the same local MLX Llama intelligence model as prompt enhancement to polish each
 caption and the final character sheet. Both modes keep the generated metadata
 editable so bad clips or captions can be removed before training.
+
+For vocal datasets, add local Whisper transcription hints:
+
+```bash
+anvil dataset build-local ./my-source-audio \
+    --name my_vocal_style \
+    --clips 80 \
+    --clip-length 35 \
+    --style-hint "dark blues, smoky male vocal, raw guitar" \
+    --caption-mode llm \
+    --transcribe-vocals
+```
+
+`--transcribe-vocals` only runs on clips whose source title or style hint looks
+vocal-focused. Use `--transcribe-all` when the source metadata is weak and you
+want every clip checked. This is local-only and requires either
+`lightning-whisper-mlx` on Apple Silicon or `openai-whisper`.
 
 Before training, run the embedding QA pass to find duplicate captions, semantic
 outliers, weak coverage, and low-confidence clips:
@@ -910,6 +929,11 @@ load and prints the explicit install command.
 | `--style-hint` | blank | Style context added to captions |
 | `--caption-mode` | `heuristic` | `heuristic`, `llm`, or `off` |
 | `--llm-model` | default | LLM path/repo for caption cleanup |
+| `--transcribe-vocals` | off | Add local Whisper hints to likely vocal clips |
+| `--transcribe-all` | off | Transcribe every clip |
+| `--transcription-backend` | `auto` | `lightning-whisper-mlx` or `whisper` |
+| `--transcription-model` | backend default | Whisper model name |
+| `--transcription-language` | auto | Optional source language code |
 | `--tracks` | unlimited | YouTube-only max source videos/tracks |
 | `--delete-downloads` | off | Delete raw downloads after clips are written |
 | `--quiet-ytdlp` | off | Pass `--quiet` to `yt-dlp` |

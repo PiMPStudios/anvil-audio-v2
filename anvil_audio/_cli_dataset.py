@@ -10,6 +10,7 @@ from pathlib import Path
 from anvil_audio.dataset_builder import (
     CaptionMode,
     DatasetBuildConfig,
+    TranscriptionBackend,
     build_local_dataset,
     build_youtube_dataset,
 )
@@ -191,6 +192,13 @@ def main() -> None:
         max_sources=getattr(args, "tracks", None),
         keep_downloads=not getattr(args, "delete_downloads", False),
         quiet_ytdlp=getattr(args, "quiet_ytdlp", False),
+        transcribe_vocals=args.transcribe_vocals or args.transcribe_all,
+        transcribe_all=args.transcribe_all,
+        transcription_backend=args.transcription_backend,
+        transcription_model=args.transcription_model,
+        transcription_language=args.transcription_language,
+        transcription_batch_size=args.transcription_batch_size,
+        transcription_max_chars=args.transcription_max_chars,
     )
     try:
         if args.command == "build-local":
@@ -294,11 +302,69 @@ def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional local path or HuggingFace repo for LLM caption cleanup.",
     )
+    parser.add_argument(
+        "--transcribe-vocals",
+        action="store_true",
+        help=(
+            "Use an optional local Whisper runtime to add short transcription hints "
+            "for clips likely to contain vocals."
+        ),
+    )
+    parser.add_argument(
+        "--transcribe-all",
+        action="store_true",
+        help=(
+            "Run local transcription on every clip. Implies --transcribe-vocals."
+        ),
+    )
+    parser.add_argument(
+        "--transcription-backend",
+        choices=("auto", "lightning-whisper-mlx", "whisper"),
+        default="auto",
+        type=_transcription_backend,
+        help=(
+            "Optional transcription backend. Default: auto "
+            "(lightning-whisper-mlx, then local whisper)."
+        ),
+    )
+    parser.add_argument(
+        "--transcription-model",
+        default=None,
+        help=(
+            "Optional local transcription model. Defaults to distil-medium.en for "
+            "lightning-whisper-mlx or small for openai-whisper."
+        ),
+    )
+    parser.add_argument(
+        "--transcription-language",
+        default=None,
+        help="Optional source language code for transcription, e.g. en.",
+    )
+    parser.add_argument(
+        "--transcription-batch-size",
+        type=int,
+        default=12,
+        help="Batch size for lightning-whisper-mlx. Default: 12.",
+    )
+    parser.add_argument(
+        "--transcription-max-chars",
+        type=int,
+        default=180,
+        help="Maximum characters from a transcript to include as a lyric hint.",
+    )
 
 
 def _caption_mode(value: str) -> CaptionMode:
     if value not in {"heuristic", "llm", "off"}:
         raise argparse.ArgumentTypeError("must be heuristic, llm, or off")
+    return value  # type: ignore[return-value]
+
+
+def _transcription_backend(value: str) -> TranscriptionBackend:
+    if value not in {"auto", "lightning-whisper-mlx", "whisper"}:
+        raise argparse.ArgumentTypeError(
+            "must be auto, lightning-whisper-mlx, or whisper"
+        )
     return value  # type: ignore[return-value]
 
 

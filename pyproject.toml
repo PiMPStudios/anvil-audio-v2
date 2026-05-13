@@ -67,6 +67,12 @@ intelligence = [
 dataset = [
     "yt-dlp>=2024.5.27",
 ]
+transcription = [
+    "openai-whisper",
+]
+mlx-transcription = [
+    "lightning-whisper-mlx",
+]
 acestep = [
     "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git",
 ]

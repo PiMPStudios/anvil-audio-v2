@@ -32,6 +32,35 @@ anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
 
 Only train on material you own or are authorized to train on.
 
+## Optional Vocal Transcription
+
+For vocal-focused datasets, add local Whisper hints while building clips:
+
+```bash
+anvil dataset build-local ./source-audio \
+    --name my_vocal_style \
+    --clips 80 \
+    --clip-length 35 \
+    --style-hint "dark blues, smoky male vocal, raw guitar" \
+    --caption-mode llm \
+    --transcribe-vocals
+```
+
+`--transcribe-vocals` uses source text and `--style-hint` to decide which clips
+are likely vocal-forward. Use `--transcribe-all` to force transcription for
+every clip. The feature is optional and local-only:
+
+```bash
+pip install lightning-whisper-mlx  # Apple Silicon
+# or
+pip install openai-whisper         # local PyTorch Whisper
+```
+
+Generated clip sidecars and `captions.json` include `transcript` and
+`transcription` fields when text is detected. Captions get a compact
+`lyric hint` phrase rather than a full transcript dump, which keeps LoRA labels
+focused.
+
 ## Output Layout
 
 ```text
