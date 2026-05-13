@@ -2025,6 +2025,8 @@ def create_unified_txt2music_ui(
     prompt = gr.Textbox(
         show_label=False,
         placeholder="Prompt",
+        lines=3,
+        max_lines=10,
         info="Describe the sound or music you want to generate.",
     )
 
@@ -2033,13 +2035,16 @@ def create_unified_txt2music_ui(
         lyrics = gr.Textbox(
             show_label=False,
             placeholder="Lyrics  (optional — leave blank or type '[Instrumental]' for no vocals)",
-            lines=4,
+            lines=8,
+            max_lines=24,
             info="Structure lyrics with section markers like [verse], [chorus], [bridge].",
         )
     with gr.Row(visible=True) as neg_prompt_row:
         negative_prompt = gr.Textbox(
             show_label=False,
             placeholder="Negative prompt",
+            lines=2,
+            max_lines=6,
             info="Describe what you don't want in the output. Leave blank to skip.",
         )
 

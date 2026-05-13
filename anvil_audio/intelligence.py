@@ -7,10 +7,14 @@ calling an external API.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher
+import importlib
 import json
 import os
 import re
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,9 @@ DEFAULT_LLM_MODEL_ID = "llama-3.2-3b-instruct-4bit"
 DEFAULT_LLM_REPO_ID = "mlx-community/Llama-3.2-3B-Instruct-4bit"
 
 _MODEL_CACHE: dict[str, tuple[Any, Any]] = {}
+_MLX_EXECUTOR: ThreadPoolExecutor | None = None
+_MLX_EXECUTOR_LOCK = threading.Lock()
+_MLX_WORKER_THREAD_ID: int | None = None
 
 
 @dataclass(slots=True)
@@ -48,6 +55,7 @@ class LyricWritingPlan:
     line_budget: str
     section_plan: str
     max_tokens: int
+    max_lyric_lines: int
 
     @classmethod
     def make(cls, duration_seconds: float) -> "LyricWritingPlan":
@@ -61,6 +69,7 @@ class LyricWritingPlan:
                     "1 to 2 lines. Do not use [Verse 2], [Bridge], or [Outro]."
                 ),
                 max_tokens=96,
+                max_lyric_lines=6,
             )
         if seconds <= 60:
             return cls(
@@ -71,6 +80,7 @@ class LyricWritingPlan:
                     "Do not use [Bridge]."
                 ),
                 max_tokens=140,
+                max_lyric_lines=10,
             )
         if seconds <= 90:
             return cls(
@@ -81,6 +91,7 @@ class LyricWritingPlan:
                     "[Bridge] unless it replaces [Verse 2]."
                 ),
                 max_tokens=200,
+                max_lyric_lines=14,
             )
         if seconds <= 150:
             return cls(
@@ -91,6 +102,7 @@ class LyricWritingPlan:
                     "[Bridge]. Keep the bridge to 2 lines."
                 ),
                 max_tokens=300,
+                max_lyric_lines=20,
             )
         return cls(
             duration_seconds=seconds,
@@ -100,6 +112,7 @@ class LyricWritingPlan:
                 "repeated filler."
             ),
             max_tokens=420,
+            max_lyric_lines=32,
         )
 
     @property
@@ -116,7 +129,8 @@ class LyricWritingPlan:
             "vocal song.\n"
             "Prefer short concrete phrases over long narrative lines.\n"
             "End on a complete line. Never trail off mid-sentence.\n"
-            "Output only lyrics with section markers. No commentary."
+            "Output only lyrics with section markers. No commentary, no chord "
+            "notes, and no parenthetical performance directions."
         )
 
     def user_prompt(self, prompt: str, style: str = "") -> str:
@@ -140,22 +154,13 @@ class LocalLLM:
         max_tokens: int,
         temperature: float = 0.7,
     ) -> str:
-        model, tokenizer = _load_mlx_model(self.model_ref)
-        prompt = _format_chat_prompt(tokenizer, system_prompt, user_prompt)
-
-        from mlx_lm import generate
-        from mlx_lm.sample_utils import make_sampler
-
-        sampler = make_sampler(temp=temperature, top_p=0.9)
-        text = generate(
-            model,
-            tokenizer,
-            prompt=prompt,
+        return _generate_mlx_text_on_worker(
+            self.model_ref,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             max_tokens=max_tokens,
-            sampler=sampler,
-            verbose=False,
+            temperature=temperature,
         )
-        return str(text).strip()
 
 
 def resolve_llm_model_ref(model: str | None = None) -> str:
@@ -216,12 +221,17 @@ def enhance_prompt(
     system_prompt = (
         "You are an audio prompt enhancer for Anvil Audio.\n"
         "Return strict JSON with exactly two string fields: prompt and negative_prompt.\n"
-        "The prompt must be a concise comma-separated audio generation prompt, "
-        "rich in genre, instruments, vocal character, tempo, mood, arrangement, "
-        "texture, and production style when relevant.\n"
+        "Rewrite the user's idea into 18 to 28 concise comma-separated audio "
+        "tags, not a sentence and not an instruction. Do not start with words "
+        "like Create, Generate, Make, Write, or Avoid. Do not echo the original "
+        "wording unchanged. Include genre or subgenre, instruments, vocal "
+        "character, tempo, key or mood, arrangement, texture, room/space, and "
+        "production style when relevant. Do not mention the target duration in "
+        "the final prompt.\n"
         "The negative_prompt must list unwanted artifacts or qualities such as "
         "muddy mix, clipping, harsh treble, weak drums, noisy artifacts, or "
-        "off-key vocals. Avoid banning the requested genre, instruments, or vocals.\n"
+        "off-key vocals as comma-separated tags. Do not start it with Avoid. "
+        "Avoid banning the requested genre, instruments, or vocals.\n"
         "Do not include lyrics. Do not include markdown."
     )
     user_prompt = (
@@ -237,15 +247,19 @@ def enhance_prompt(
         temperature=0.65,
     )
     parsed = _parse_prompt_json(raw)
-    enhanced = parsed.get("prompt") or _strip_wrapping(raw) or prompt
+    enhanced = _compact_prompt_tags(
+        _clean_prompt_line(parsed.get("prompt") or _strip_wrapping(raw) or prompt)
+    )
+    if _is_weak_enhancement(prompt, enhanced):
+        enhanced = _fallback_enhanced_prompt(prompt, mode)
     suggested_negative = (
         parsed.get("negative_prompt")
         or negative_prompt
         or _default_negative_prompt(mode)
     )
     return PromptPackage(
-        prompt=_clean_single_line(enhanced),
-        negative_prompt=_clean_single_line(suggested_negative),
+        prompt=enhanced,
+        negative_prompt=_clean_negative_prompt(suggested_negative),
         raw=raw,
     )
 
@@ -270,7 +284,7 @@ def write_lyrics(
         max_tokens=plan.max_tokens,
         temperature=0.8,
     )
-    return _clean_lyrics(text)
+    return _clean_lyrics(text, max_lyric_lines=plan.max_lyric_lines)
 
 
 def prepare_song_prompt(
@@ -328,6 +342,94 @@ def _load_mlx_model(model_ref: str) -> tuple[Any, Any]:
     model, tokenizer = load(model_ref)
     _MODEL_CACHE[model_ref] = (model, tokenizer)
     return model, tokenizer
+
+
+def _generate_mlx_text_on_worker(
+    model_ref: str,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    temperature: float,
+) -> str:
+    """Run MLX-LM generation on one stable thread.
+
+    MLX streams are thread-local. Gradio can run button callbacks on different
+    worker threads, so sharing a cached MLX model directly across callbacks can
+    fail with "There is no Stream(gpu, N) in current thread." Keeping all local
+    LLM loads and generations on one executor thread keeps the model and stream
+    ownership aligned.
+    """
+    if threading.get_ident() == _MLX_WORKER_THREAD_ID:
+        return _generate_mlx_text(
+            model_ref,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    executor = _get_mlx_executor()
+    future = executor.submit(
+        _generate_mlx_text,
+        model_ref,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    return future.result()
+
+
+def _get_mlx_executor() -> ThreadPoolExecutor:
+    global _MLX_EXECUTOR
+    with _MLX_EXECUTOR_LOCK:
+        if _MLX_EXECUTOR is None:
+            _MLX_EXECUTOR = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="anvil-mlx-llm",
+                initializer=_mark_mlx_worker_thread,
+            )
+        return _MLX_EXECUTOR
+
+
+def _mark_mlx_worker_thread() -> None:
+    global _MLX_WORKER_THREAD_ID
+    _MLX_WORKER_THREAD_ID = threading.get_ident()
+
+
+def _generate_mlx_text(
+    model_ref: str,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    temperature: float,
+) -> str:
+    model, tokenizer = _load_mlx_model(model_ref)
+    prompt = _format_chat_prompt(tokenizer, system_prompt, user_prompt)
+
+    generate_module = importlib.import_module("mlx_lm.generate")
+    _bind_mlx_lm_generation_stream(generate_module)
+    from mlx_lm.sample_utils import make_sampler
+
+    sampler = make_sampler(temp=temperature, top_p=0.9)
+    text = generate_module.generate(
+        model,
+        tokenizer,
+        prompt=prompt,
+        max_tokens=max_tokens,
+        sampler=sampler,
+        verbose=False,
+    )
+    return str(text).strip()
+
+
+def _bind_mlx_lm_generation_stream(generate_module: Any) -> None:
+    """Bind mlx-lm's module-level generation stream to the current thread."""
+    import mlx.core as mx
+
+    generate_module.generation_stream = mx.new_stream(mx.default_device())
 
 
 def _default_llm_cache_dir() -> Path:
@@ -389,7 +491,27 @@ def _parse_prompt_json(text: str) -> dict[str, str]:
                 "prompt": str(obj.get("prompt", "")).strip(),
                 "negative_prompt": str(obj.get("negative_prompt", "")).strip(),
             }
-    return {}
+    return _extract_prompt_json_fields(text)
+
+
+def _extract_prompt_json_fields(text: str) -> dict[str, str]:
+    """Best-effort extraction for truncated local LLM JSON."""
+    result: dict[str, str] = {}
+    for key in ("prompt", "negative_prompt"):
+        match = re.search(
+            rf'"{key}"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)',
+            text,
+            flags=re.DOTALL,
+        )
+        if not match:
+            continue
+        value = match.group("value")
+        value = re.sub(r'"\s*,\s*"(?:prompt|negative_prompt)"\s*:\s*.*$', "", value)
+        try:
+            result[key] = json.loads(f'"{value}"').strip()
+        except json.JSONDecodeError:
+            result[key] = value.replace('\\"', '"').strip()
+    return result
 
 
 def _strip_wrapping(text: str) -> str:
@@ -404,14 +526,188 @@ def _clean_single_line(text: str) -> str:
     return " ".join(text.replace("\n", " ").split()).strip()
 
 
-def _clean_lyrics(text: str) -> str:
+def _clean_prompt_line(text: str) -> str:
+    text = _clean_single_line(text)
+    text = re.sub(r'^\s*\{?\s*"prompt"\s*:\s*"?', "", text, flags=re.IGNORECASE)
+    text = re.sub(r'"\s*,\s*"negative_prompt"\s*:\s*".*$', "", text)
+    text = re.sub(r'"\s*\}?\s*$', "", text)
+    text = re.split(r"\b(?:and\s+)?avoid\b", text, maxsplit=1, flags=re.IGNORECASE)[0]
+    text = re.sub(r"\b\d+\s*-?\s*(?:seconds?|secs?)\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"^\s*(?:create|generate|make|write)\s+(?:a|an)?\s*(?P<desc>.+?)\s+"
+        r"(?:music\s+)?(?:piece|track|song)\s+(?:with|featuring)\s+",
+        lambda match: f"{match.group('desc')}, ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"^\s*(?:create|generate|make|write)\s+(?:a|an)?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\b(?:featuring|using|with a focus on|with an emphasis on|with)\b",
+        ", ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\b(?:and|plus)\b", ", ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*,\s*,+", ", ", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip(" ,")
+
+
+def _compact_prompt_tags(text: str, max_tags: int = 28) -> str:
+    tags = [tag.strip() for tag in re.split(r",|;", text) if tag.strip()]
+    if len(tags) <= 1:
+        return text
+
+    clean_tags: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        tag = _clean_prompt_line(tag)
+        tag = re.sub(
+            r"^(?:a|an|the|and|with|featuring|using)\s+",
+            "",
+            tag,
+            flags=re.IGNORECASE,
+        )
+        tag = re.sub(r"^mix of\s+", "", tag, flags=re.IGNORECASE)
+        if not tag:
+            continue
+        key = re.sub(r"[^a-z0-9]+", " ", tag.lower()).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean_tags.append(tag)
+        if len(clean_tags) >= max_tags:
+            break
+    return ", ".join(clean_tags)
+
+
+def _clean_negative_prompt(text: str) -> str:
+    text = _clean_single_line(text)
+    text = re.sub(r"^(?:avoid|no|without)\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:with a focus on|while also|and avoiding)\b.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*,\s*,+", ", ", text)
+    return text.strip(" .,")
+
+
+def _is_weak_enhancement(original: str, enhanced: str) -> bool:
+    original_clean = _clean_single_line(original).lower()
+    enhanced_clean = _clean_prompt_line(enhanced).lower()
+    if not enhanced_clean:
+        return True
+    if enhanced_clean == original_clean:
+        return True
+
+    original_words = set(re.findall(r"[a-z0-9']+", original_clean))
+    enhanced_words = set(re.findall(r"[a-z0-9']+", enhanced_clean))
+    added_words = enhanced_words - original_words
+    similarity = SequenceMatcher(None, original_clean, enhanced_clean).ratio()
+    return similarity > 0.9 and len(added_words) <= 3
+
+
+def _fallback_enhanced_prompt(prompt: str, mode: str) -> str:
+    text = _clean_single_line(prompt)
+    lowered = text.lower()
+    tags = [text]
+
+    keyword_tags = [
+        (("blues",), ["dark blues", "raw blues guitar", "smoky club ambience"]),
+        (("rock",), ["guitar-driven rock arrangement", "live drums", "warm bass"]),
+        (("vocal", "vocals", "singer"), ["expressive lead vocal", "natural vocal phrasing"]),
+        (("male",), ["gritty male vocal"]),
+        (("female",), ["emotive female vocal"]),
+        (("slow",), ["slow tempo", "laid-back groove"]),
+        (("fast", "upbeat"), ["driving tempo", "forward momentum"]),
+        (("minor", "dark"), ["minor-key harmony", "brooding mood", "melancholic tension"]),
+        (("guitar",), ["raw guitar tone", "expressive bends"]),
+        (("atmospheric", "ambient"), ["wide atmospheric reverb", "spacious texture"]),
+        (("cinematic",), ["cinematic build", "wide dynamic range"]),
+        (("electronic", "synth"), ["layered synth texture", "clean electronic production"]),
+        (("drum", "drums"), ["punchy drum kit", "tight transient detail"]),
+        (("bass",), ["warm low end", "defined bass movement"]),
+    ]
+    for keywords, additions in keyword_tags:
+        if any(keyword in lowered for keyword in keywords):
+            tags.extend(additions)
+
+    if len(tags) == 1:
+        if mode.lower() in {"music", "song", "acestep"}:
+            tags.extend(
+                [
+                    "clear musical arrangement",
+                    "defined instrumentation",
+                    "natural dynamics",
+                    "balanced modern mix",
+                ]
+            )
+        else:
+            tags.extend(
+                [
+                    "clean sound design",
+                    "detailed texture",
+                    "focused transient detail",
+                    "balanced mix",
+                ]
+            )
+
+    tags.extend(["organic performance", "intimate room tone", "polished but natural mix"])
+    return _dedupe_tags(tags)
+
+
+def _dedupe_tags(tags: list[str]) -> str:
+    seen: set[str] = set()
+    clean_tags: list[str] = []
+    for tag in tags:
+        clean = _clean_prompt_line(tag)
+        key = clean.lower()
+        if clean and key not in seen:
+            seen.add(key)
+            clean_tags.append(clean)
+    return ", ".join(clean_tags)
+
+
+def _clean_lyrics(text: str, max_lyric_lines: int | None = None) -> str:
     text = _strip_wrapping(text)
-    lines = [line.rstrip() for line in text.splitlines()]
+    lines = [
+        line.rstrip()
+        for line in text.splitlines()
+        if not re.fullmatch(r"\s*\([^)]*\)\s*", line)
+    ]
     while lines and not lines[0].strip():
         lines.pop(0)
     while lines and not lines[-1].strip():
         lines.pop()
+    if max_lyric_lines is not None:
+        lines = _limit_lyric_lines(lines, max_lyric_lines)
     return "\n".join(lines).strip()
+
+
+def _limit_lyric_lines(lines: list[str], max_lyric_lines: int) -> list[str]:
+    limited: list[str] = []
+    lyric_count = 0
+    for line in lines:
+        stripped = line.strip()
+        is_section = bool(re.fullmatch(r"\[[^\]]+\]", stripped))
+        if not stripped:
+            if limited and limited[-1].strip():
+                limited.append(line)
+            continue
+        if is_section:
+            if lyric_count < max_lyric_lines:
+                limited.append(line)
+            continue
+        if lyric_count >= max_lyric_lines:
+            continue
+        limited.append(line)
+        lyric_count += 1
+
+    while limited and (not limited[-1].strip() or re.fullmatch(r"\[[^\]]+\]", limited[-1].strip())):
+        limited.pop()
+    return limited
 
 
 def _default_negative_prompt(mode: str) -> str:
