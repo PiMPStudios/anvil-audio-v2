@@ -27,6 +27,7 @@ def test_custom_theme_css_scopes_gradio_theme_variables(monkeypatch, tmp_path):
 
     css = gradio_ui._build_custom_theme_css()
 
+    assert ".anvil-github-star" in css
     assert 'html[data-anvil-theme="ocean"]' in css
     assert 'html[data-anvil-theme="citrus"]' in css
     assert 'html[data-anvil-theme="terminal"]' in css
@@ -60,3 +61,12 @@ def test_theme_javascript_persists_and_restores_selection():
     assert "data-anvil-theme" in gradio_ui._THEME_LOAD_JS
     assert "hmb/terminal" in gradio_ui._THEME_APPLY_JS
     assert "YTheme/Minecraft" in gradio_ui._THEME_LOAD_JS
+
+
+def test_github_star_html_points_to_public_repo():
+    html = gradio_ui._github_star_html()
+
+    assert "https://github.com/PiMPStudios/anvil-audio-v2" in html
+    assert 'target="_blank"' in html
+    assert 'rel="noopener noreferrer"' in html
+    assert "Star on GitHub" in html

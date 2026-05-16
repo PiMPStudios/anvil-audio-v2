@@ -57,6 +57,7 @@ _last_generated_path: str = ""  # path of the most recently generated file
 sample_rate: int = 32000
 sample_size: int = 1920000
 
+_GITHUB_REPO_URL = "https://github.com/PiMPStudios/anvil-audio-v2"
 _THEME_DEFAULT_VALUE = "anvil-default"
 _THEME_CSS_ATTR = "_anvil_custom_theme_css"
 _THEME_BUILTIN_CLASSES = {
@@ -156,6 +157,41 @@ def _build_custom_theme_css() -> str:
 
     chunks = [
         """
+html .anvil-github-star {
+  align-items: center;
+  color: var(--body-text-color-subdued);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+html .anvil-github-star a {
+  align-items: center;
+  background: var(--button-secondary-background-fill);
+  border: 1px solid var(--border-color-primary);
+  border-radius: 6px;
+  color: var(--body-text-color);
+  display: inline-flex;
+  font-weight: 600;
+  justify-content: center;
+  line-height: 1;
+  min-height: 32px;
+  padding: 0 12px;
+  text-decoration: none;
+}
+
+html .anvil-github-star a:hover {
+  background: var(--button-secondary-background-fill-hover);
+  border-color: var(--border-color-accent);
+  color: var(--body-text-color);
+}
+
+html .anvil-github-star span {
+  line-height: 1.35;
+}
+
 html[data-anvil-theme] .anvil-theme-picker {
   border-color: var(--border-color-accent);
 }
@@ -188,6 +224,18 @@ def _theme_markdown(value: str) -> str:
         theme_id: description for theme_id, _label, description in _THEME_PRESETS
     }
     return descriptions.get(value, descriptions[_THEME_DEFAULT_VALUE])
+
+
+def _github_star_html() -> str:
+    return f"""
+<div class="anvil-github-star">
+  <a href="{_GITHUB_REPO_URL}" target="_blank" rel="noopener noreferrer"
+     aria-label="Open Anvil Audio v2 on GitHub to star the repository">
+    Star on GitHub
+  </a>
+  <span>If Anvil is useful, a star helps other audio builders find it.</span>
+</div>
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -2541,6 +2589,7 @@ def create_ui(
                     value=project,
                     info="Keeps your files organized by project. Outputs go to ~/anvil-audio-outputs/{project}/. Leave blank for 'default'.",
                 )
+                gr.HTML(_github_star_html())
             with gr.Column(scale=3):
                 model_dropdown = gr.Dropdown(
                     choices=registered_models,
