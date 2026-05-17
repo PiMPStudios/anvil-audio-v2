@@ -1027,6 +1027,7 @@ singularity build anvil-audio.sif docker-daemon://anvil-audio
 - [ ] PyPI package (`pip install anvil-audio`)
 - [ ] Contribution guidelines
 - [ ] More audio augmentations
+- [ ] Generation trace panel with ACE-Step pathing, sidecar diffing, and A/B audio comparison
 
 ---
 
