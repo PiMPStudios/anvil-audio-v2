@@ -753,18 +753,18 @@ Anvil exposes its full capabilities as an [MCP](https://modelcontextprotocol.io)
 Claude and other MCP clients can generate and edit audio directly without the Gradio UI or
 manual CLI commands.
 
-### Install
+The MCP runtime is included in the default install. If you installed with
+`bash install.sh` or `pip install -e .`, the server is ready to run with:
 
 ```bash
-pip install mcp
+.venv/bin/python -m anvil_audio.mcp_server
 ```
-
-The `mcp` package is not installed by default. Everything else is already a dependency.
 
 ### Available tools
 
 | Tool | What it does |
 |---|---|
+| `prepare_music_prompt` | Enhance prompt, negatives, and lyrics |
 | `generate_audio` | Generate a clip from a prompt; auto-selects model if not specified |
 | `batch_generate` | Generate multiple clips in one call |
 | `edit_audio` | Post-process a file with normalize, trim, EQ, reverb, etc. |

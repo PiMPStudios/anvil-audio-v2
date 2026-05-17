@@ -37,6 +37,7 @@ setup(
         'k-diffusion==0.1.1',             # API-sensitive, keep pinned
         'laion-clap>=1.1.4',
         'local-attention>=1.8.6',
+        'mcp>=1.9.0',
         'pandas>=2.0.0',
         'pedalboard>=0.7.4',
         'prefigure>=0.0.9',

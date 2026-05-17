@@ -61,6 +61,15 @@ def check_mlx_transcription_installed() -> bool:
         return False
 
 
+def check_mcp_installed() -> bool:
+    """Return True if the ``mcp`` package is importable."""
+    try:
+        __import__("mcp")
+        return True
+    except ImportError:
+        return False
+
+
 def print_environment_report() -> None:
     """Print a human-readable summary of the current environment."""
     plat = detect_platform()
@@ -68,11 +77,13 @@ def print_environment_report() -> None:
     mlx_ok = check_mlx_installed()
     mlx_lm_ok = check_mlx_lm_installed()
     mlx_transcription_ok = check_mlx_transcription_installed()
+    mcp_ok = check_mcp_installed()
 
     print(f"Platform:           {plat}")
     print(f"ACE-Step:           {'installed' if acestep_ok else 'NOT installed'}")
     print(f"MLX (Stable Audio): {'installed' if mlx_ok else 'NOT installed'}")
     print(f"MLX-LM intelligence: {'installed' if mlx_lm_ok else 'NOT installed'}")
+    print(f"MCP server:         {'installed' if mcp_ok else 'NOT installed'}")
     print(
         "MLX vocal transcription: "
         f"{'installed' if mlx_transcription_ok else 'NOT installed'}"
@@ -88,6 +99,9 @@ def print_environment_report() -> None:
     if not mlx_lm_ok and plat == "macos-arm":
         print("\nTo enable local prompt enhancement and lyric writing:")
         print("  pip install mlx-lm")
+    if not mcp_ok:
+        print("\nTo enable the MCP server:")
+        print("  pip install -e .")
     if not mlx_transcription_ok and plat == "macos-arm":
         print("\nTo enable vocal transcription for dataset builds:")
         print("  pip install lightning-whisper-mlx")

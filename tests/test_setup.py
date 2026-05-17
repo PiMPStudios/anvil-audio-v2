@@ -103,3 +103,18 @@ def test_check_mlx_transcription_installed_false_when_missing(monkeypatch):
     from anvil_audio._setup import check_mlx_transcription_installed
 
     assert check_mlx_transcription_installed() is False
+
+
+def test_check_mcp_installed_false_when_missing(monkeypatch):
+    real_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "mcp":
+            raise ImportError
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    from anvil_audio._setup import check_mcp_installed
+
+    assert check_mcp_installed() is False
