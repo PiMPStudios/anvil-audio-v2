@@ -181,3 +181,6 @@ entities.json
 
 # Claude Code
 .claude/
+
+# Grok local workspace files
+.grok/
