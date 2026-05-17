@@ -8,6 +8,9 @@ Use these docs when you want more detail:
 - [Datasets](datasets.md) - current Anvil workflow for local/YouTube dataset
   creation, vocal transcription, Qwen embedding QA, ACE-Step LoRA preprocessing,
   and LoRA training.
+- [Cloud training and model notes](cloud-training-and-model-notes.md) - working
+  design notes for burst GPU training, source separation, ACE-Step component
+  fine-tuning, and future training automation.
 - [Stable Audio Open](Stable_Audio_Open.md) - inherited Stable Audio Open 1.0
   generation notes and HuggingFace access guidance.
 - [Diffusion](diffusion.md), [conditioning](conditioning.md),

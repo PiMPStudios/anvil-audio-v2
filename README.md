@@ -112,6 +112,9 @@ anvil setup
 - [Dataset and LoRA workflow](docs/datasets.md) covers local/YouTube dataset
   creation, vocal transcription, Qwen embedding QA, ACE-Step preprocessing, and
   training.
+- [Cloud training and model notes](docs/cloud-training-and-model-notes.md)
+  capture the planned burst-GPU runner, source separation, LoRA versus deeper
+  training, and ACE-Step component fine-tuning ideas.
 - [Stable Audio Open notes](docs/Stable_Audio_Open.md) cover the inherited
   Stable Audio Open 1.0 generation scripts and HuggingFace access notes.
 - [Model internals](docs/diffusion.md), [conditioning](docs/conditioning.md),
@@ -1027,7 +1030,6 @@ singularity build anvil-audio.sif docker-daemon://anvil-audio
 - [ ] PyPI package (`pip install anvil-audio`)
 - [ ] Contribution guidelines
 - [ ] More audio augmentations
-- [ ] Generation trace panel with ACE-Step pathing, sidecar diffing, and A/B audio comparison
 
 ---
 
