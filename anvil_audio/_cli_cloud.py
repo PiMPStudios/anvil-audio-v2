@@ -9,8 +9,10 @@ from pathlib import Path
 
 from anvil_audio.cloud import (
     CloudJobPackageConfig,
+    GPUFindrSearch,
     SSHRunConfig,
     create_cloud_job_package,
+    fetch_gpufindr_offers,
     format_command,
     run_ssh_job,
 )
@@ -27,6 +29,67 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "doctor",
         help="Check local tools needed for cloud packaging and SSH runs.",
+    )
+
+    search = subparsers.add_parser(
+        "search",
+        help="Search live GPU availability before signing up with a provider.",
+    )
+    search.add_argument(
+        "--gpu",
+        default="",
+        help="Case-insensitive GPU name filter, e.g. h200, h100, l40s.",
+    )
+    search.add_argument(
+        "--source",
+        default="",
+        help="Provider filter, e.g. lambda, runpod, vast, tensordock.",
+    )
+    search.add_argument(
+        "--location",
+        default="",
+        help="Location substring filter, e.g. us, tor, eu.",
+    )
+    search.add_argument(
+        "--max-price",
+        type=float,
+        default=None,
+        help="Max hourly total price in USD.",
+    )
+    search.add_argument(
+        "--min-vram-gb",
+        type=float,
+        default=0.0,
+        help="Minimum VRAM per listed offer in GB.",
+    )
+    search.add_argument(
+        "--min-gpus",
+        type=int,
+        default=1,
+        help="Minimum GPUs in the listed offer.",
+    )
+    search.add_argument(
+        "--min-reliability",
+        type=float,
+        default=0.0,
+        help="Minimum provider reliability score when available.",
+    )
+    search.add_argument(
+        "--sort",
+        default="total_cost_ph.asc",
+        help="GPUFindr sort, e.g. total_cost_ph.asc or flops_per_dollar_ph.desc.",
+    )
+    search.add_argument(
+        "--limit",
+        type=int,
+        default=15,
+        help="Max rows to print after local filters. Default: 15.",
+    )
+    search.add_argument(
+        "--max-pages",
+        type=int,
+        default=5,
+        help="Max GPUFindr pages to scan before local filters. Default: 5.",
     )
 
     package = subparsers.add_parser(
@@ -142,6 +205,28 @@ def main() -> None:
         ok = _cmd_doctor()
         raise SystemExit(0 if ok else 1)
 
+    if args.command == "search":
+        try:
+            offers = fetch_gpufindr_offers(
+                GPUFindrSearch(
+                    gpu=args.gpu,
+                    source=args.source,
+                    location=args.location,
+                    max_price=args.max_price,
+                    min_vram_gb=args.min_vram_gb,
+                    min_gpus=args.min_gpus,
+                    min_reliability=args.min_reliability,
+                    sort=args.sort,
+                    limit=args.limit,
+                    max_pages=args.max_pages,
+                )
+            )
+        except Exception as exc:
+            print(f"cloud search failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_gpu_offers(offers)
+        return
+
     if args.command == "package":
         try:
             result = create_cloud_job_package(
@@ -208,6 +293,28 @@ def _cmd_doctor() -> bool:
         if name in {"bash", "ssh", "rsync"} and path is None:
             ok = False
     return ok
+
+
+def _print_gpu_offers(offers) -> None:
+    if not offers:
+        print("No matching GPU offers found.")
+        return
+    print(
+        f"{'GPU':<16} {'PROVIDER':<12} {'LOCATION':<18} "
+        f"{'PRICE':>9} {'VRAM':>7} {'COUNT':>5} {'REL':>5} URL"
+    )
+    print("-" * 104)
+    for offer in offers:
+        print(
+            f"{offer.name[:16]:<16} "
+            f"{offer.source[:12]:<12} "
+            f"{offer.location[:18]:<18} "
+            f"${offer.total_cost_ph:>7.2f} "
+            f"{offer.vram_gb:>6.0f}G "
+            f"{offer.num_gpus:>5} "
+            f"{offer.reliability:>5.2f} "
+            f"{offer.url}"
+        )
 
 
 def _print_package_result(result) -> None:

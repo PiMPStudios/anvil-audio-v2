@@ -4,6 +4,12 @@ import stat
 import pytest
 
 from anvil_audio.cloud import CloudJobPackageConfig, SSHRunConfig
+from anvil_audio.cloud.gpufindr import (
+    GPUFindrSearch,
+    GPUOffer,
+    build_gpufindr_url,
+    filter_gpufindr_offers,
+)
 from anvil_audio.cloud.job import create_cloud_job_package
 from anvil_audio.cloud.ssh import plan_ssh_run
 
@@ -77,6 +83,67 @@ def test_plan_ssh_run_builds_dry_run_commands(tmp_path):
     assert "scripts/run_training.sh" in commands[3][-1]
     assert "scripts/collect.sh" in commands[4][-1]
     assert commands[-1][0] == "rsync"
+
+
+def test_gpufindr_url_includes_remote_filters():
+    url = build_gpufindr_url(
+        GPUFindrSearch(
+            gpu="h200",
+            source="lambda",
+            location="us",
+            max_price=4.0,
+            sort="total_cost_ph.asc",
+            limit=5,
+        )
+    )
+
+    assert url.startswith("https://gpufindr.com/gpus?")
+    assert "source=lambda" in url
+    assert "location=us" in url
+    assert "max_price=4.0" in url
+    assert "sort=total_cost_ph.asc" in url
+    assert "offset=" not in url
+
+    page_two = build_gpufindr_url(GPUFindrSearch(), offset=1000)
+    assert "offset=1000" in page_two
+
+
+def test_gpufindr_filter_keeps_matching_viable_offers():
+    offers = [
+        GPUOffer(
+            id="1",
+            source="lambda",
+            location="us-east",
+            name="H200",
+            num_gpus=1,
+            vram_gb=96,
+            total_cost_ph=1.49,
+            reliability=0.99,
+            flops_per_dollar_ph=44.0,
+            gpu_mem_bw_gbps=4800,
+            url="https://example.test/h200",
+        ),
+        GPUOffer(
+            id="2",
+            source="vast",
+            location="us",
+            name="RTX 4090",
+            num_gpus=1,
+            vram_gb=24,
+            total_cost_ph=0.45,
+            reliability=0.98,
+            flops_per_dollar_ph=100.0,
+            gpu_mem_bw_gbps=1000,
+            url="https://example.test/4090",
+        ),
+    ]
+
+    result = filter_gpufindr_offers(
+        offers,
+        GPUFindrSearch(gpu="h200", min_vram_gb=80, min_gpus=1),
+    )
+
+    assert [offer.id for offer in result] == ["1"]
 
 
 def _write_training_bundle(tmp_path):

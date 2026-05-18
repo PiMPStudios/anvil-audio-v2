@@ -258,6 +258,7 @@ Preview an SSH run before touching the remote box:
 
 ```bash
 anvil cloud doctor
+anvil cloud search --gpu h200 --max-price 4 --min-vram-gb 80
 
 anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
     --host ubuntu@203.0.113.10 \
@@ -266,6 +267,10 @@ anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
 
 Remove `--dry-run` when the commands look right. Add `--collect` to package and
 sync `outputs/` plus `logs/` back after training.
+
+`anvil cloud search` uses GPUFindr's public read-only catalog. It is only a
+provider discovery step; provisioning still happens through the provider until
+Anvil grows provider-specific launch adapters.
 
 ## ACE-Step LoRA Preprocessing
 

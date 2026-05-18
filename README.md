@@ -619,6 +619,8 @@ GPU host:
 ```bash
 anvil cloud doctor
 
+anvil cloud search --gpu h200 --max-price 4 --min-vram-gb 80
+
 anvil dataset export-training-bundle ./datasets/my_style_YYYYMMDD_HHMMSS \
     --include full-mix,instrumental
 
@@ -638,6 +640,9 @@ The cloud package includes `job.json`, copied training assets, rewritten
 captions, and `bootstrap.sh`/`run_training.sh` scripts. Remove `--dry-run` once
 the SSH and `rsync` commands look right. Provider API launchers can be added
 later without changing the job format.
+
+`anvil cloud search` uses GPUFindr's read-only public GPU catalog to show live
+provider availability and pricing before you create an account somewhere.
 
 ---
 

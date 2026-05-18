@@ -66,6 +66,8 @@ providers can all plug in later because the provider-specific part is reduced to
 ```bash
 anvil cloud doctor
 
+anvil cloud search --gpu h200 --max-price 4 --min-vram-gb 80
+
 anvil dataset export-training-bundle ~/Developer/TrainingDatasets/datasets/Dark_Bluesy \
     --include full-mix,instrumental
 
@@ -82,11 +84,13 @@ anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
     --dry-run
 ```
 
-`anvil cloud doctor` checks for local `ssh`, `rsync`, `bash`, and `git`. Remove
-`--dry-run` when the remote commands look right. The runner uploads the job with
-`rsync`, runs `scripts/bootstrap.sh`, then runs `scripts/run_training.sh`.
-Passing `--collect` also runs `scripts/collect.sh` and syncs `outputs/` plus
-`logs/` back into `remote_artifacts/`.
+`anvil cloud doctor` checks for local `ssh`, `rsync`, `bash`, and `git`.
+`anvil cloud search` queries GPUFindr's read-only public catalog so users can
+see whether suitable GPUs exist before creating provider accounts or entering
+billing details. Remove `--dry-run` when the remote commands look right. The
+runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`, then runs
+`scripts/run_training.sh`. Passing `--collect` also runs `scripts/collect.sh`
+and syncs `outputs/` plus `logs/` back into `remote_artifacts/`.
 
 Each job package has this shape:
 
