@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.metadata
 import os
 import shutil
 import subprocess
@@ -31,10 +30,20 @@ class AudioSeparatorBackend:
 
     @property
     def version(self) -> str:
-        try:
-            return importlib.metadata.version("audio-separator")
-        except importlib.metadata.PackageNotFoundError:
+        executable = _audio_separator_executable()
+        if executable is None:
             return "not-installed"
+        try:
+            completed = subprocess.run(
+                [str(executable), "--version"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception:
+            return "unknown"
+        return completed.stdout.strip() or "unknown"
 
     def separate(self, request: SeparationRequest) -> SeparationResult:
         """Separate one clip with python-audio-separator."""
@@ -143,5 +152,6 @@ def _missing_dependency_message() -> str:
     return (
         "audio-separator CLI is required for dataset source separation. Install "
         "it in an isolated tool environment, then set ANVIL_AUDIO_SEPARATOR_BIN "
-        "to that environment's audio-separator executable."
+        "to that environment's audio-separator executable. On Python 3.13, also "
+        "install onnxruntime in that tool environment."
     )

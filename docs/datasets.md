@@ -148,7 +148,9 @@ unless you are deliberately testing dependency changes.
 
 ```bash
 python3.13 -m venv ~/.cache/anvil-audio/tools/audio-separator
-~/.cache/anvil-audio/tools/audio-separator/bin/pip install 'audio-separator>=0.44.1'
+~/.cache/anvil-audio/tools/audio-separator/bin/pip install \
+    'audio-separator>=0.44.1' \
+    onnxruntime
 export ANVIL_AUDIO_SEPARATOR_BIN=~/.cache/anvil-audio/tools/audio-separator/bin/audio-separator
 ```
 

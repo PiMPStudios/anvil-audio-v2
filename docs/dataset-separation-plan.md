@@ -203,7 +203,9 @@ The first implementation slice adds:
 `audio-separator` should run from an isolated tool environment for now. Its
 current dependency set upgrades `numpy` and `protobuf` beyond versions required
 by some existing Anvil audio packages, so adding it as a normal in-venv extra is
-not safe yet.
+not safe yet. On Python 3.13, install `onnxruntime` in that same isolated tool
+environment because `audio-separator` imports it at CLI startup but does not
+currently declare it as a direct dependency.
 
 Next slices should test the separator against real music clips and then feed
 `training_bundle.json` into ACE-Step preprocessing/training paths.
