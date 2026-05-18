@@ -35,6 +35,10 @@ def test_caption_repair_dry_run_does_not_write(tmp_path):
     assert result.warnings == ["Dry run only; pass --write to update captions.json."]
     captions = json.loads((dataset / "captions.json").read_text(encoding="utf-8"))
     assert captions[0]["caption"] == "same caption"
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert report["duplicates"][0]["caption"] == "same caption"
+    assert report["proposed_repairs"][0]["before"] == "same caption"
+    assert report["proposed_repairs"][0]["after"] != "same caption"
 
 
 def test_caption_repair_updates_captions_and_sidecars(tmp_path):
@@ -52,7 +56,8 @@ def test_caption_repair_updates_captions_and_sidecars(tmp_path):
     assert result.repaired_count == 2
     captions = json.loads((dataset / "captions.json").read_text(encoding="utf-8"))
     assert captions[0]["caption"] != "same caption"
-    assert "dark blues" in captions[0]["caption"]
+    assert "slow guitar" in captions[0]["caption"]
+    assert "playlist" not in captions[0]["caption"]
     assert captions[0]["confidence"] == 0.68
     assert captions[0]["caption_history"][0]["mode"] == "heuristic"
 

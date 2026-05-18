@@ -55,28 +55,40 @@ def audit_or_repair_captions(config: CaptionAuditConfig) -> CaptionAuditResult:
         if _as_float(record.get("confidence"), default=0.0) < config.min_confidence
     ]
     repaired_count = 0
+    proposed_repairs: list[dict[str, Any]] = []
     warnings: list[str] = []
 
     if config.mode == "heuristic":
         for index, record in enumerate(normalized, start=1):
             if not _should_repair(record, duplicate_groups, config):
                 continue
+            original_caption = str(record.get("caption") or record.get("prompt") or "")
             caption_payload = _repaired_caption(record, config.style_hint)
-            record["caption"] = caption_payload["caption"]
-            record["prompt"] = caption_payload["caption"]
-            record["tags"] = caption_payload["tags"]
-            record["negative_tags"] = caption_payload["negative_tags"]
-            record["confidence"] = caption_payload["confidence"]
-            record.setdefault("caption_history", []).append(
+            proposed_repairs.append(
                 {
-                    "updated_at": datetime.now(UTC).isoformat(),
-                    "mode": "heuristic",
-                    "reason": "duplicate_or_low_confidence",
-                    "index": index,
+                    "file": str(record.get("file") or ""),
+                    "before": original_caption,
+                    "after": caption_payload["caption"],
+                    "confidence": caption_payload["confidence"],
+                    "tags": caption_payload["tags"],
                 }
             )
-            _update_clip_sidecar(dataset_dir, record)
             repaired_count += 1
+            if config.write:
+                record["caption"] = caption_payload["caption"]
+                record["prompt"] = caption_payload["caption"]
+                record["tags"] = caption_payload["tags"]
+                record["negative_tags"] = caption_payload["negative_tags"]
+                record["confidence"] = caption_payload["confidence"]
+                record.setdefault("caption_history", []).append(
+                    {
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "mode": "heuristic",
+                        "reason": "duplicate_or_low_confidence",
+                        "index": index,
+                    }
+                )
+                _update_clip_sidecar(dataset_dir, record)
         if config.write:
             _write_json(captions_path, records)
             manifest = _load_json_object(manifest_path)
@@ -118,6 +130,7 @@ def audit_or_repair_captions(config: CaptionAuditConfig) -> CaptionAuditResult:
             }
             for record in low_confidence[:40]
         ],
+        "proposed_repairs": proposed_repairs[:80],
         "warnings": warnings,
     }
     report_path = (
@@ -160,18 +173,18 @@ def _should_repair(
 
 def _repaired_caption(record: dict[str, Any], style_hint: str) -> dict[str, Any]:
     analysis = _analysis(record)
-    separation = record.get("separation") if isinstance(record.get("separation"), dict) else {}
     source = record.get("source") if isinstance(record.get("source"), dict) else {}
-    title = str(source.get("title") or Path(str(record.get("file") or "")).stem)
+    title = _useful_title(str(source.get("title") or ""))
     tags = []
-    tags.extend(_tags_from_text(style_hint))
+    tags.extend(_style_tags(style_hint))
     tags.extend(_tags_from_text(title))
     tags.extend(_audio_tags(analysis))
-    tags.extend(_stem_tags(separation))
-    tags = _dedupe(tags)[:12]
+    tags = _dedupe_meaningful(tags)[:12]
     caption = ", ".join(tags or ["audio training clip"])
-    if title and title not in caption:
-        caption = f"{caption}, source {title[:60]}"
+    if title:
+        title_tags = _dedupe_meaningful(_tags_from_text(title))[:3]
+        if title_tags:
+            caption = f"{caption}, {', '.join(title_tags)}"
     return {
         "caption": _clean_caption(caption),
         "tags": tags,
@@ -187,35 +200,24 @@ def _analysis(record: dict[str, Any]) -> dict[str, Any]:
 
 def _audio_tags(analysis: dict[str, Any]) -> list[str]:
     tags = []
-    for field_name in (
-        "energy",
-        "brightness",
-        "bass_character",
-        "density",
-        "stereo_character",
-    ):
-        value = str(analysis.get(field_name) or "").strip()
-        if value:
-            tags.append(value if field_name != "brightness" else f"{value} tone")
+    energy = str(analysis.get("energy") or "").strip()
+    if energy:
+        tags.append(f"{energy} energy")
+    brightness = str(analysis.get("brightness") or "").strip()
+    if brightness:
+        tags.append(f"{brightness} tone")
+    bass = str(analysis.get("bass_character") or "").strip()
+    if bass:
+        tags.append(bass)
+    density = str(analysis.get("density") or "").strip()
+    if density:
+        tags.append(f"{density} rhythm")
+    stereo = str(analysis.get("stereo_character") or "").strip()
+    if stereo:
+        tags.append(stereo)
     tempo = analysis.get("tempo_bpm_estimate")
     if tempo:
         tags.append(f"around {tempo} bpm")
-    return tags
-
-
-def _stem_tags(separation: Any) -> list[str]:
-    if not isinstance(separation, dict):
-        return []
-    stems = separation.get("stems")
-    if not isinstance(stems, dict):
-        return []
-    tags = []
-    if "instrumental" in stems:
-        tags.append("instrumental stem available")
-    if "vocals" in stems:
-        tags.append("vocal stem available")
-    if {"drums", "bass", "other"}.intersection(stems):
-        tags.append("multi-stem separated")
     return tags
 
 
@@ -247,11 +249,15 @@ def _update_clip_sidecar(dataset_dir: Path, record: dict[str, Any]) -> None:
 
 
 def _tags_from_text(text: str) -> list[str]:
-    lowered = text.lower().replace("_", " ").replace("-", " ")
+    lowered = _clean_source_text(text)
     pieces = []
     for token in lowered.replace("|", ",").replace("/", ",").split(","):
         cleaned = " ".join(token.split()).strip()
-        if 3 <= len(cleaned) <= 36 and any(ch.isalpha() for ch in cleaned):
+        if (
+            3 <= len(cleaned) <= 36
+            and any(ch.isalpha() for ch in cleaned)
+            and not _looks_like_id_or_playlist_junk(cleaned)
+        ):
             pieces.append(cleaned)
     keywords = [
         "ambient",
@@ -268,6 +274,52 @@ def _tags_from_text(text: str) -> list[str]:
     return _dedupe(pieces)
 
 
+def _style_tags(style_hint: str) -> list[str]:
+    tags = []
+    for item in _tags_from_text(style_hint):
+        lowered = item.lower()
+        if lowered in {"dark", "blues", "cinematic", "instrumental", "rock", "vocal"}:
+            continue
+        tags.append(item)
+    return tags
+
+
+def _useful_title(title: str) -> str:
+    cleaned = _clean_source_text(title)
+    if not cleaned or _looks_like_id_or_playlist_junk(cleaned):
+        return ""
+    banned = (
+        "playlist for",
+        "best of",
+        "move in silence",
+        "youtube",
+        "official",
+    )
+    if any(piece in cleaned for piece in banned):
+        return ""
+    return cleaned
+
+
+def _clean_source_text(text: str) -> str:
+    lowered = text.lower().replace("_", " ").replace("-", " ")
+    return " ".join(lowered.split())
+
+
+def _looks_like_id_or_playlist_junk(text: str) -> bool:
+    words = text.split()
+    if not words:
+        return True
+    if len(words) <= 3 and any(any(ch.isdigit() for ch in word) for word in words):
+        return True
+    compact = "".join(ch for ch in text if ch.isalnum())
+    if len(compact) >= 8:
+        upperish = sum(1 for ch in compact if ch.isupper())
+        digitish = sum(1 for ch in compact if ch.isdigit())
+        if digitish >= 3 or upperish >= 3:
+            return True
+    return False
+
+
 def _normalize_caption(text: str) -> str:
     return " ".join(text.lower().split())
 
@@ -278,6 +330,23 @@ def _clean_caption(text: str) -> str:
 
 def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
+
+
+def _dedupe_meaningful(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen_words: set[str] = set()
+    for value in values:
+        cleaned = _clean_caption(value.lower())
+        if not cleaned:
+            continue
+        words = set(cleaned.replace("&", " ").split())
+        if cleaned in result:
+            continue
+        if words and words.issubset(seen_words):
+            continue
+        result.append(cleaned)
+        seen_words.update(words)
+    return result
 
 
 def _as_string_list(value: Any) -> list[str]:
