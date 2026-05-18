@@ -262,7 +262,7 @@ anvil cloud search --gpu h200 --max-price 4 --min-vram-gb 80
 
 export RUNPOD_API_KEY=...
 anvil cloud runpod launch ./cloud-jobs/my_style_h200 \
-    --gpu-type "NVIDIA H200" \
+    --gpu-type "H200" \
     --dry-run
 
 anvil cloud run-ssh ./cloud-jobs/my_style_h200 \

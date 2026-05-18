@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
 DEFAULT_RUNPOD_IMAGE = "runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404"
+DEFAULT_RUNPOD_TEMPLATE_ID = "runpod-torch-v280"
 DEFAULT_RUNPOD_PORTS = "22/tcp"
 DEFAULT_RUNPOD_VOLUME_MOUNT = "/workspace"
 
@@ -26,6 +27,7 @@ class RunPodLaunchConfig:
     name: str | None = None
     gpu_count: int = 1
     image_name: str = DEFAULT_RUNPOD_IMAGE
+    template_id: str | None = DEFAULT_RUNPOD_TEMPLATE_ID
     cloud_type: str = "ALL"
     volume_gb: int = 100
     container_disk_gb: int = 80
@@ -66,12 +68,16 @@ def build_launch_request(config: RunPodLaunchConfig) -> RunPodRequest:
         "minMemoryInGb": max(1, int(config.min_memory_gb)),
         "gpuTypeId": config.gpu_type,
         "name": config.name or f"anvil-{job_dir.name}",
-        "imageName": config.image_name,
-        "dockerArgs": config.docker_args,
         "ports": config.ports,
+        "startSsh": True,
         "volumeMountPath": config.volume_mount_path,
         "env": _env_list(config.env | _default_job_env(job_dir)),
     }
+    if config.template_id:
+        input_payload["templateId"] = config.template_id
+    else:
+        input_payload["imageName"] = config.image_name
+        input_payload["dockerArgs"] = config.docker_args
     if config.allowed_cuda_versions:
         input_payload["allowedCudaVersions"] = list(config.allowed_cuda_versions)
     return RunPodRequest(

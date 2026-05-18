@@ -22,7 +22,7 @@ from anvil_audio.cloud import (
     ssh_target_from_pod,
     terminate_pod,
 )
-from anvil_audio.cloud.runpod import DEFAULT_RUNPOD_IMAGE
+from anvil_audio.cloud.runpod import DEFAULT_RUNPOD_IMAGE, DEFAULT_RUNPOD_TEMPLATE_ID
 from anvil_audio.cloud.job import ASSET_NAMES, available_recipes
 
 
@@ -216,14 +216,25 @@ def build_parser() -> argparse.ArgumentParser:
     runpod_launch.add_argument(
         "--gpu-type",
         required=True,
-        help='RunPod GPU type id/name, e.g. "NVIDIA H200".',
+        help='RunPod GPU type id/name, e.g. "H200" or "NVIDIA H200".',
     )
     runpod_launch.add_argument("--name", default=None, help="Optional pod name.")
     runpod_launch.add_argument("--gpu-count", type=int, default=1)
     runpod_launch.add_argument(
         "--image",
         default=DEFAULT_RUNPOD_IMAGE,
-        help=f"RunPod image. Default: {DEFAULT_RUNPOD_IMAGE}.",
+        help=(
+            f"RunPod image used when --template-id is empty. "
+            f"Default: {DEFAULT_RUNPOD_IMAGE}."
+        ),
+    )
+    runpod_launch.add_argument(
+        "--template-id",
+        default=DEFAULT_RUNPOD_TEMPLATE_ID,
+        help=(
+            "RunPod template id. Default: "
+            f"{DEFAULT_RUNPOD_TEMPLATE_ID}. Pass an empty string to use --image."
+        ),
     )
     runpod_launch.add_argument(
         "--cloud-type",
@@ -421,6 +432,7 @@ def _cmd_runpod(args) -> None:
                     name=args.name,
                     gpu_count=args.gpu_count,
                     image_name=args.image,
+                    template_id=args.template_id or None,
                     cloud_type=args.cloud_type,
                     volume_gb=args.volume_gb,
                     container_disk_gb=args.container_disk_gb,

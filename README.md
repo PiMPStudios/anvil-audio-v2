@@ -633,7 +633,7 @@ anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle.json \
 
 export RUNPOD_API_KEY=...
 anvil cloud runpod launch ./cloud-jobs/my_style_h200 \
-    --gpu-type "NVIDIA H200" \
+    --gpu-type "H200" \
     --dry-run
 
 anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
@@ -650,9 +650,8 @@ later without changing the job format.
 provider availability and pricing before you create an account somewhere.
 `anvil cloud runpod launch` uses RunPod's GraphQL pod API; keep `--dry-run` on
 until the request looks right, then remove it to create a pod. The default
-RunPod image is pinned to an explicit PyTorch/CUDA tag because
-`runpod/pytorch:latest` is not published. Use `anvil cloud runpod terminate
-POD_ID` when the run is done.
+RunPod launch uses template `runpod-torch-v280`, matching RunPod's Torch 2.8
+deploy URL. Use `anvil cloud runpod terminate POD_ID` when the run is done.
 
 ---
 

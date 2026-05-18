@@ -173,9 +173,33 @@ def test_runpod_launch_request_uses_job_and_ssh_defaults(tmp_path):
     assert variables["gpuTypeId"] == "NVIDIA H200"
     assert variables["name"] == "anvil-test"
     assert variables["ports"] == "22/tcp"
-    assert variables["dockerArgs"] == "sleep infinity"
+    assert variables["startSsh"] is True
+    assert variables["templateId"] == "runpod-torch-v280"
+    assert "dockerArgs" not in variables
+    assert "imageName" not in variables
     assert variables["allowedCudaVersions"] == ["12.1", "12.2"]
     assert {"key": "ANVIL_CLOUD_JOB_NAME", "value": "job"} in variables["env"]
+
+
+def test_runpod_launch_request_can_use_raw_image(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    job = create_cloud_job_package(
+        CloudJobPackageConfig(training_bundle=bundle, output_dir=tmp_path / "job")
+    )
+
+    request = build_launch_request(
+        RunPodLaunchConfig(
+            job_dir=job.job_dir,
+            gpu_type="H200",
+            template_id=None,
+            image_name="runpod/pytorch:test",
+        )
+    )
+
+    variables = request.variables["input"]
+    assert variables["imageName"] == "runpod/pytorch:test"
+    assert variables["dockerArgs"] == "sleep infinity"
+    assert "templateId" not in variables
 
 
 def test_runpod_launch_dry_run_does_not_require_api_key(tmp_path):

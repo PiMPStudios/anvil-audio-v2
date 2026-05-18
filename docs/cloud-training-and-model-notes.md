@@ -81,7 +81,7 @@ anvil cloud package \
 
 export RUNPOD_API_KEY=...
 anvil cloud runpod launch ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
-    --gpu-type "NVIDIA H200" \
+    --gpu-type "H200" \
     --dry-run
 
 anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
@@ -94,10 +94,10 @@ anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
 see whether suitable GPUs exist before creating provider accounts or entering
 billing details. `anvil cloud runpod launch` prepares a RunPod
 `podFindAndDeployOnDemand` GraphQL request and requires `RUNPOD_API_KEY` unless
-it is run with `--dry-run`. The default RunPod image is an explicit PyTorch/CUDA
-tag, not `latest`, because RunPod does not publish `runpod/pytorch:latest`.
-Remove `--dry-run` when the remote commands look right. The runner uploads the
-job with `rsync`, runs `scripts/bootstrap.sh`, then runs
+it is run with `--dry-run`. The default RunPod launch uses template
+`runpod-torch-v280`, matching the deploy URLs returned by GPUFindr for RunPod
+H200/H100/A100 offers. Remove `--dry-run` when the remote commands look right.
+The runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`, then runs
 `scripts/run_training.sh`. Passing `--collect` also runs `scripts/collect.sh`
 and syncs `outputs/` plus `logs/` back into `remote_artifacts/`.
 
