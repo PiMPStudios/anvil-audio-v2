@@ -57,6 +57,10 @@ def main() -> None:
         from anvil_audio._cli_lora import main as lora_main
 
         lora_main()
+    elif sub == "cloud":
+        from anvil_audio._cli_cloud import main as cloud_main
+
+        cloud_main()
     elif sub == "enhance-prompt":
         from anvil_audio._cli_intelligence import main as intelligence_main
 
@@ -125,6 +129,7 @@ def _print_help() -> None:
         "  generate    Generate audio from a model and prompt\n"
         "  dataset     Build local or YouTube audio datasets for LoRA training\n"
         "  lora        Import adapters and run ACE-Step LoRA preprocessing/training\n"
+        "  cloud       Package and run provider-agnostic remote training jobs\n"
         "  enhance-prompt  Enhance a prompt and optionally write lyrics\n"
         "  setup       Check environment and optionally pre-download model weights\n"
         "\n"

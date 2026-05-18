@@ -1,0 +1,134 @@
+import json
+import stat
+
+import pytest
+
+from anvil_audio.cloud import CloudJobPackageConfig, SSHRunConfig
+from anvil_audio.cloud.job import create_cloud_job_package
+from anvil_audio.cloud.ssh import plan_ssh_run
+
+
+def test_create_cloud_job_package_copies_primary_assets(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    output_dir = tmp_path / "jobs" / "dark_blues_job"
+
+    result = create_cloud_job_package(
+        CloudJobPackageConfig(
+            training_bundle=bundle,
+            output_dir=output_dir,
+            primary_asset="instrumental",
+            repo_url="https://example.test/anvil.git",
+            repo_ref="feature-cloud",
+        )
+    )
+
+    assert result.job_dir == output_dir.resolve()
+    assert result.clip_count == 1
+    assert result.asset_count == 1
+    assert (output_dir / "inputs/dataset/stems/clip_0001/instrumental.wav").is_file()
+
+    captions = json.loads(
+        (output_dir / "inputs/dataset/captions.json").read_text(encoding="utf-8")
+    )
+    assert captions[0]["file"] == "stems/clip_0001/instrumental.wav"
+    assert captions[0]["source_file"] == "clips/clip_0001.wav"
+
+    job = json.loads((output_dir / "job.json").read_text(encoding="utf-8"))
+    assert job["primary_asset"] == "instrumental"
+    assert job["runtime"]["repo_ref"] == "feature-cloud"
+    assert job["training"]["recipe"] == "lora-balanced"
+
+    bootstrap = output_dir / "scripts/bootstrap.sh"
+    assert bootstrap.stat().st_mode & stat.S_IXUSR
+
+
+def test_create_cloud_job_package_fails_without_primary_assets(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+
+    with pytest.raises(RuntimeError, match="No clips with primary asset vocals"):
+        create_cloud_job_package(
+            CloudJobPackageConfig(
+                training_bundle=bundle,
+                output_dir=tmp_path / "job",
+                primary_asset="vocals",
+            )
+        )
+
+
+def test_plan_ssh_run_builds_dry_run_commands(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    result = create_cloud_job_package(
+        CloudJobPackageConfig(training_bundle=bundle, output_dir=tmp_path / "job")
+    )
+
+    commands = plan_ssh_run(
+        SSHRunConfig(
+            job_dir=result.job_dir,
+            host="ubuntu@203.0.113.10",
+            port=2222,
+            dry_run=True,
+            collect=True,
+        )
+    )
+
+    assert commands[0][:4] == ["ssh", "-p", "2222", "ubuntu@203.0.113.10"]
+    assert commands[1][0] == "rsync"
+    assert "scripts/bootstrap.sh" in commands[2][-1]
+    assert "scripts/run_training.sh" in commands[3][-1]
+    assert "scripts/collect.sh" in commands[4][-1]
+    assert commands[-1][0] == "rsync"
+
+
+def _write_training_bundle(tmp_path):
+    dataset = tmp_path / "dataset"
+    (dataset / "clips").mkdir(parents=True)
+    (dataset / "stems/clip_0001").mkdir(parents=True)
+    (dataset / "clips/clip_0001.wav").write_bytes(b"mix")
+    (dataset / "stems/clip_0001/instrumental.wav").write_bytes(b"inst")
+    (dataset / "captions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "file": "clips/clip_0001.wav",
+                    "caption": "dark blues guitar",
+                    "prompt": "dark blues guitar",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (dataset / "dataset_manifest.json").write_text(
+        json.dumps({"name": "dark_blues"}),
+        encoding="utf-8",
+    )
+    bundle = dataset / "training_bundle.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "anvil_training_bundle_version": "1.0",
+                "dataset_name": "dark_blues",
+                "dataset_dir": str(dataset),
+                "clip_count": 1,
+                "asset_count": 2,
+                "clips": [
+                    {
+                        "id": "clip_0001",
+                        "file": "clips/clip_0001.wav",
+                        "caption": "dark blues guitar",
+                        "prompt": "dark blues guitar",
+                        "tags": ["dark blues"],
+                        "negative_tags": ["muddy mix"],
+                        "confidence": 0.8,
+                        "seconds_start": 0.0,
+                        "seconds_total": 35.0,
+                        "assets": {
+                            "full-mix": "clips/clip_0001.wav",
+                            "instrumental": "stems/clip_0001/instrumental.wav",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bundle

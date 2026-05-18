@@ -236,6 +236,37 @@ This writes `training_bundle.json` with the selected assets, captions, tags,
 negative tags, timing, and warnings for missing optional assets. Use `--strict`
 when a missing requested asset should fail the export.
 
+## Portable Cloud Jobs
+
+`anvil cloud package` turns a training bundle into a self-contained folder that
+can be uploaded to any SSH GPU host:
+
+```bash
+anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle.json \
+    --output-dir ./cloud-jobs/my_style_h200 \
+    --primary-asset instrumental \
+    --model-variant sft \
+    --recipe lora-balanced \
+    --max-hours 6
+```
+
+The package copies the selected assets under `inputs/dataset`, rewrites
+`captions.json` so the selected `--primary-asset` is the training file, and
+writes remote scripts for bootstrap, training, and collection.
+
+Preview an SSH run before touching the remote box:
+
+```bash
+anvil cloud doctor
+
+anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
+    --host ubuntu@203.0.113.10 \
+    --dry-run
+```
+
+Remove `--dry-run` when the commands look right. Add `--collect` to package and
+sync `outputs/` plus `logs/` back after training.
+
 ## ACE-Step LoRA Preprocessing
 
 ACE-Step LoRA training needs preprocessed tensor files. Convert an Anvil dataset

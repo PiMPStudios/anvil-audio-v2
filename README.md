@@ -113,8 +113,8 @@ anvil setup
   creation, vocal transcription, Qwen embedding QA, ACE-Step preprocessing, and
   training.
 - [Cloud training and model notes](docs/cloud-training-and-model-notes.md)
-  capture the planned burst-GPU runner, source separation, LoRA versus deeper
-  training, and ACE-Step component fine-tuning ideas.
+  cover portable cloud job packages, the SSH runner, source separation, LoRA
+  versus deeper training, and ACE-Step component fine-tuning ideas.
 - [Stable Audio Open notes](docs/Stable_Audio_Open.md) cover the inherited
   Stable Audio Open 1.0 generation scripts and HuggingFace access notes.
 - [Model internals](docs/diffusion.md), [conditioning](docs/conditioning.md),
@@ -610,6 +610,34 @@ On Apple Silicon, add `--basic-loop` if Lightning Fabric fails with MPS AMP
 gradient-scaler errors. This uses ACE-Step's own non-Fabric training loop.
 Keep preprocessing at `--precision fp32`; lower precision can produce non-finite
 conditioning tensors on the Apple path.
+
+### Portable Cloud Jobs
+
+When the dataset is ready, export a bundle and package it for any SSH-accessible
+GPU host:
+
+```bash
+anvil cloud doctor
+
+anvil dataset export-training-bundle ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --include full-mix,instrumental
+
+anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle.json \
+    --output-dir ./cloud-jobs/my_style_h200 \
+    --primary-asset instrumental \
+    --model-variant sft \
+    --recipe lora-balanced \
+    --max-hours 6
+
+anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
+    --host ubuntu@203.0.113.10 \
+    --dry-run
+```
+
+The cloud package includes `job.json`, copied training assets, rewritten
+captions, and `bootstrap.sh`/`run_training.sh` scripts. Remove `--dry-run` once
+the SSH and `rsync` commands look right. Provider API launchers can be added
+later without changing the job format.
 
 ---
 

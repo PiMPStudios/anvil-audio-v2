@@ -52,12 +52,67 @@ single button.
 ```text
 anvil cloud doctor
 anvil cloud package
+anvil cloud run-ssh
 anvil cloud launch
-anvil cloud bootstrap
-anvil cloud train
-anvil cloud collect
 anvil cloud destroy
 ```
+
+The first implemented slice is provider-agnostic packaging plus an SSH runner.
+That means Anvil can prepare a portable job folder locally, then run it on any
+GPU host that exposes normal SSH. DigitalOcean, RunPod, Lambda, Vast, and other
+providers can all plug in later because the provider-specific part is reduced to
+"give me an SSH machine with a GPU."
+
+```bash
+anvil cloud doctor
+
+anvil dataset export-training-bundle ~/Developer/TrainingDatasets/datasets/Dark_Bluesy \
+    --include full-mix,instrumental
+
+anvil cloud package \
+    ~/Developer/TrainingDatasets/datasets/Dark_Bluesy/training_bundle.json \
+    --output-dir ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
+    --primary-asset instrumental \
+    --model-variant sft \
+    --recipe lora-balanced \
+    --max-hours 6
+
+anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
+    --host ubuntu@203.0.113.10 \
+    --dry-run
+```
+
+`anvil cloud doctor` checks for local `ssh`, `rsync`, `bash`, and `git`. Remove
+`--dry-run` when the remote commands look right. The runner uploads the job with
+`rsync`, runs `scripts/bootstrap.sh`, then runs `scripts/run_training.sh`.
+Passing `--collect` also runs `scripts/collect.sh` and syncs `outputs/` plus
+`logs/` back into `remote_artifacts/`.
+
+Each job package has this shape:
+
+```text
+cloud-job/
+  job.json
+  training_bundle.json
+  inputs/
+    dataset/
+      captions.json
+      dataset_manifest.json
+      clips/...
+      stems/...
+  logs/
+  outputs/
+  scripts/
+    bootstrap.sh
+    run_training.sh
+    collect.sh
+  work/
+```
+
+`anvil cloud package` rewrites `inputs/dataset/captions.json` so the selected
+`--primary-asset` becomes the actual training file. That is what lets a future
+run train against full mixes, instrumental stems, or vocal stems without
+manually editing captions.
 
 Expected behavior:
 
