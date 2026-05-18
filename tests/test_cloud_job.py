@@ -221,6 +221,10 @@ def test_runpod_ssh_target_from_runtime_ports():
     assert target == "root@203.0.113.10 -p 32061"
 
 
+def test_runpod_ssh_target_handles_pending_runtime():
+    assert ssh_target_from_pod({"runtime": None}) is None
+
+
 def _write_training_bundle(tmp_path):
     dataset = tmp_path / "dataset"
     (dataset / "clips").mkdir(parents=True)

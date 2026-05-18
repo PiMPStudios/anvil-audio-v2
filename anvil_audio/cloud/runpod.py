@@ -126,7 +126,10 @@ def terminate_pod(pod_id: str, *, api_key: str | None = None, dry_run: bool = Fa
 
 def ssh_target_from_pod(pod: dict[str, Any]) -> str | None:
     """Return `root@ip -p port` guidance when RunPod exposes SSH runtime info."""
-    ports = pod.get("runtime", {}).get("ports")
+    runtime = pod.get("runtime")
+    if not isinstance(runtime, dict):
+        return None
+    ports = runtime.get("ports")
     if not isinstance(ports, list):
         return None
     for item in ports:
