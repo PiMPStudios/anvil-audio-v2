@@ -64,6 +64,11 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert 'pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python' in bootstrap_text
     assert 'pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python' in bootstrap_text
 
+    training_text = (output_dir / "scripts/run_training.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'rm -rf "$TENSOR_DIR"' in training_text
+
 
 def test_create_cloud_job_package_fails_without_primary_assets(tmp_path):
     bundle = _write_training_bundle(tmp_path)

@@ -303,7 +303,10 @@ anvil lora preprocess ./datasets/my_style_20260512_140000 \
 This writes `acestep_dataset.json` into the dataset folder, then delegates to
 ACE-Step's `training_v2` preprocessing pipeline to produce `.pt` tensors.
 Anvil validates the tensor files after preprocessing and fails fast if any
-non-finite conditioning values are written.
+non-finite conditioning values are written. The generated ACE-Step sample
+filenames are index-prefixed so stem-heavy datasets with many files named
+`instrumental.wav` or `vocals.wav` do not collide inside ACE-Step's temporary
+preprocessing outputs.
 
 Then run training from those tensors:
 

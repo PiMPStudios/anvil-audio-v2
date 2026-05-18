@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -106,7 +107,7 @@ def write_acestep_dataset_json(
         sample_genre = genre or ", ".join(record.get("tags", [])[:5])
         samples.append(
             {
-                "filename": audio_path.name,
+                "filename": _sample_filename(index, rel_file),
                 "audio_path": str(audio_path),
                 "caption": caption,
                 "lyrics": lyrics,
@@ -363,6 +364,14 @@ def _is_instrumental(caption: str, lyrics: str) -> bool:
     if lyrics.strip() and lyrics.strip().lower() != "[instrumental]":
         return False
     return not any(word in text for word in ("vocal", "voice", "singer", "lyrics"))
+
+
+def _sample_filename(index: int, rel_file: str) -> str:
+    path = Path(rel_file)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._-")
+    stem = stem or "audio"
+    suffix = path.suffix or ".wav"
+    return f"{index:05d}_{stem}{suffix}"
 
 
 def _read_json(path: Path) -> Any:

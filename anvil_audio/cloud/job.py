@@ -487,13 +487,16 @@ JOB_ROOT="$(cd "$(dirname "${{BASH_SOURCE[0]}}")/.." && pwd)"
 cd "$JOB_ROOT"
 
 source .venv/bin/activate
-mkdir -p work/tensors outputs/lora logs
+mkdir -p work outputs/lora logs
 
 DATASET_DIR="$JOB_ROOT/inputs/dataset"
 TENSOR_DIR="$JOB_ROOT/work/tensors"
 OUTPUT_DIR="$JOB_ROOT/outputs/lora"
 CHECKPOINT_DIR="${{ANVIL_CHECKPOINT_DIR:-{checkpoint_dir}}}"
 MAX_SECONDS="${{ANVIL_MAX_SECONDS:-{int(training["max_seconds"])}}}"
+
+rm -rf "$TENSOR_DIR"
+mkdir -p "$TENSOR_DIR"
 
 echo "Preprocessing dataset: $DATASET_DIR"
 anvil lora preprocess "$DATASET_DIR" \\

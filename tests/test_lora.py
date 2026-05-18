@@ -87,7 +87,39 @@ def test_write_acestep_dataset_json_from_anvil_dataset(tmp_path):
     assert payload["metadata"]["custom_tag"] == "my_style"
     assert payload["samples"][0]["caption"] == "gritty rock, live drums"
     assert payload["samples"][0]["audio_path"].endswith("clip_0001.wav")
+    assert payload["samples"][0]["filename"] == "00001_clip_0001.wav"
     assert payload["samples"][0]["lyrics"] == "[Instrumental]"
+
+
+def test_write_acestep_dataset_json_uses_unique_sample_names(tmp_path):
+    dataset = tmp_path / "dataset"
+    (dataset / "stems/clip_0001").mkdir(parents=True)
+    (dataset / "stems/clip_0002").mkdir(parents=True)
+    (dataset / "stems/clip_0001/instrumental.wav").write_bytes(b"RIFF")
+    (dataset / "stems/clip_0002/instrumental.wav").write_bytes(b"RIFF")
+    (dataset / "dataset_manifest.json").write_text(
+        json.dumps({"name": "test_style"}),
+        encoding="utf-8",
+    )
+    (dataset / "captions.json").write_text(
+        json.dumps(
+            [
+                {"file": "stems/clip_0001/instrumental.wav", "caption": "first"},
+                {"file": "stems/clip_0002/instrumental.wav", "caption": "second"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = write_acestep_dataset_json(dataset)
+    samples = json.loads(output.read_text(encoding="utf-8"))["samples"]
+
+    assert [sample["filename"] for sample in samples] == [
+        "00001_instrumental.wav",
+        "00002_instrumental.wav",
+    ]
+    assert samples[0]["audio_path"].endswith("clip_0001/instrumental.wav")
+    assert samples[1]["audio_path"].endswith("clip_0002/instrumental.wav")
 
 
 def test_build_train_command_targets_fixed_trainer(tmp_path):
