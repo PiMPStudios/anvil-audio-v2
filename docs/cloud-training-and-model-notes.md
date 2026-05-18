@@ -110,7 +110,9 @@ The generated bootstrap creates a system-site-packages venv so managed GPU
 images can keep their baked-in CUDA/PyTorch stack. It installs Anvil from the
 selected branch, installs ACE-Step's training dependencies separately, and then
 installs ACE-Step with dependency resolution disabled so ACE-Step's exact torch
-pin does not replace the provider image's working torch build. Remote uploads
+pin does not replace the provider image's working torch build. The Anvil
+package is force-refreshed from the selected Git ref so reusable pods do not
+keep stale code just because the package version number stayed the same. Remote uploads
 preserve `.venv`, `work`, `outputs`, and `logs`, so a later `--skip-bootstrap`
 training run does not erase the environment created by bootstrap. Bootstrap
 also verifies the required ACE-Step checkpoints before training. Every job

@@ -423,6 +423,12 @@ if [[ "$(uname -s)" == "Linux" ]]; then
 fi
 python -m pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python
 python -m pip install \\
+  "$ANVIL_AUDIO_INSTALL" \\
+  --force-reinstall \\
+  --no-cache-dir \\
+  --no-deps \\
+  --ignore-requires-python
+python -m pip install \\
   {acestep_dependencies} \\
   --ignore-requires-python
 python -m pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python

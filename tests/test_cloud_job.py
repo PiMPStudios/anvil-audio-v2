@@ -62,6 +62,8 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert "download_submodel" in bootstrap_text
     assert 'REQUIRED_CHECKPOINT_MODELS=\'["main", "acestep-v15-sft"]\'' in bootstrap_text
     assert 'pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python' in bootstrap_text
+    assert "--force-reinstall" in bootstrap_text
+    assert "--no-cache-dir" in bootstrap_text
     assert 'pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python' in bootstrap_text
 
     training_text = (output_dir / "scripts/run_training.sh").read_text(
