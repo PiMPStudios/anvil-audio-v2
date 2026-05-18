@@ -195,6 +195,8 @@ The first implementation slice adds:
 - `audio-separator` CLI backend support via `ANVIL_AUDIO_SEPARATOR_BIN`
 - `instrumental`, `four-stem`, and `vocals` modes
 - cached `stems/<clip>/separation.json`
+- automatic non-WAV clip normalization to `stems/<clip>/source.wav` before
+  source separation
 - clip sidecar, `captions.json`, and `dataset_manifest.json` updates
 - `anvil dataset qa --include-stems` for missing stem, near-silence, clipping,
   and duration-mismatch checks

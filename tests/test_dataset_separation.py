@@ -112,7 +112,32 @@ def test_separate_dataset_limit_only_updates_selected_records(tmp_path):
     assert "separation" not in captions[1]
 
 
-def _write_dataset(tmp_path: Path) -> Path:
+def test_separate_dataset_normalizes_non_wav_source_for_backend(
+    monkeypatch,
+    tmp_path,
+):
+    dataset = _write_dataset(tmp_path, suffix=".m4a")
+    backend = FakeSeparationBackend()
+    ffmpeg = tmp_path / "ffmpeg"
+    ffmpeg.write_text("#!/bin/sh\n/bin/cp \"$6\" \"${11}\"\n", encoding="utf-8")
+    ffmpeg.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{Path('/usr/bin')}")
+
+    result = separate_dataset(
+        DatasetSeparationConfig(dataset_dir=dataset, mode="instrumental", limit=1),
+        backend=backend,
+    )
+
+    assert backend.calls == 1
+    assert result.clips[0].result.input_path == dataset / "clips/clip_0001.m4a"
+    assert (
+        "normalized non-WAV source for separation: clip_0001.m4a"
+        in result.clips[0].result.warnings
+    )
+    assert (dataset / "stems/clip_0001/source.wav").exists()
+
+
+def _write_dataset(tmp_path: Path, *, suffix: str = ".wav") -> Path:
     dataset = tmp_path / "dataset"
     clips = dataset / "clips"
     clips.mkdir(parents=True)
@@ -121,12 +146,17 @@ def _write_dataset(tmp_path: Path) -> Path:
         t = torch.linspace(0, 1.0, sample_rate)
         mono = 0.2 * torch.sin(2 * math.pi * freq * t)
         audio = torch.stack([mono, mono])
-        clip = clips / f"clip_{index:04d}.wav"
-        torchaudio.save(str(clip), audio, sample_rate)
+        clip = clips / f"clip_{index:04d}{suffix}"
+        if suffix == ".wav":
+            torchaudio.save(str(clip), audio, sample_rate)
+        else:
+            temp_wav = clips / f"clip_{index:04d}.source.wav"
+            torchaudio.save(str(temp_wav), audio, sample_rate)
+            temp_wav.rename(clip)
         (clips / f"clip_{index:04d}.json").write_text(
             json.dumps(
                 {
-                    "file": f"clips/clip_{index:04d}.wav",
+                    "file": f"clips/clip_{index:04d}{suffix}",
                     "caption": "dark blues guitar vocal",
                 }
             ),
@@ -135,14 +165,14 @@ def _write_dataset(tmp_path: Path) -> Path:
 
     captions = [
         {
-            "file": "clips/clip_0001.wav",
+            "file": f"clips/clip_0001{suffix}",
             "caption": "dark blues guitar vocal",
             "tags": ["dark blues", "guitar", "vocal"],
             "negative_tags": ["muddy mix"],
             "confidence": 0.8,
         },
         {
-            "file": "clips/clip_0002.wav",
+            "file": f"clips/clip_0002{suffix}",
             "caption": "slow blues guitar atmosphere",
             "tags": ["dark blues", "guitar"],
             "negative_tags": ["muddy mix"],

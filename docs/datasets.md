@@ -35,6 +35,10 @@ anvil dataset build-youtube "https://www.youtube.com/playlist?list=..." \
 
 Only train on material you own or are authorized to train on.
 
+YouTube source downloads may start as whatever container YouTube provides, but
+Anvil writes generated dataset clips as WAV files under `clips/`. That keeps
+source separation, QA, and training preprocessing on a predictable audio format.
+
 ## Optional Vocal Transcription
 
 For vocal-focused datasets, add local Whisper hints while building clips:
@@ -140,6 +144,11 @@ datasets/my_style_YYYYMMDD_HHMMSS/
       instrumental.wav
       separation.json
 ```
+
+For older or imported datasets whose `clips/` are still `.m4a`, `.webm`, or
+another compressed format, `anvil dataset separate` normalizes each non-WAV clip
+to `stems/<clip>/source.wav` before calling `audio-separator`. New datasets
+built with `anvil dataset build-youtube` should already have WAV clips.
 
 Install the separation backend in an isolated tool environment when you need it.
 `audio-separator` currently wants newer `numpy`/`protobuf` versions than some

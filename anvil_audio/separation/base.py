@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -152,8 +153,13 @@ def separate_dataset(
 
         clip_stem = clip_path.stem
         output_dir = stems_dir / clip_stem
+        separator_input, normalization_warning = _separator_input_path(
+            clip_path,
+            output_dir,
+            force=config.force,
+        )
         request = SeparationRequest(
-            input_path=clip_path,
+            input_path=separator_input,
             output_dir=output_dir,
             mode=config.mode,
             model=config.model,
@@ -162,6 +168,10 @@ def separate_dataset(
             model_file_dir=config.model_file_dir,
         )
         result = _separate_clip(request, backend)
+        if separator_input != clip_path:
+            result.input_path = clip_path
+        if normalization_warning:
+            result.warnings.append(normalization_warning)
         stem_info = _build_stem_info(dataset_dir, result)
         separation_path = output_dir / "separation.json"
         payload = _separation_payload(dataset_dir, result, stem_info)
@@ -285,6 +295,48 @@ def _build_stem_info(
             analysis=analyze_audio_tensor(audio, sample_rate),
         )
     return stem_info
+
+
+def _separator_input_path(
+    clip_path: Path,
+    output_dir: Path,
+    *,
+    force: bool,
+) -> tuple[Path, str]:
+    if clip_path.suffix.lower() == ".wav":
+        return clip_path, ""
+    normalized_path = output_dir / "source.wav"
+    if normalized_path.is_file() and not force:
+        return (
+            normalized_path,
+            f"normalized non-WAV source for separation: {clip_path.name}",
+        )
+    executable = shutil.which("ffmpeg")
+    if executable is None:
+        return (
+            clip_path,
+            "ffmpeg not found; using original non-WAV source for separation",
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    command = [
+        executable,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(clip_path),
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        str(normalized_path),
+    ]
+    subprocess.run(command, check=True)
+    return (
+        normalized_path,
+        f"normalized non-WAV source for separation: {clip_path.name}",
+    )
 
 
 def _separation_payload(
