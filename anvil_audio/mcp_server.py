@@ -195,6 +195,9 @@ def _run_generate(
     project: str,
     lyrics: str,
     negative_prompt: str = "",
+    lora: str = "",
+    lora_scale: float = 1.0,
+    lora_adapter_name: str = "",
 ) -> dict[str, Any]:
     """Core generation logic shared by generate_audio and batch_generate."""
     import numpy as np
@@ -225,6 +228,30 @@ def _run_generate(
         conditioning = [
             {"prompt": prompt, "seconds_start": 0.0, "seconds_total": duration}
         ]
+
+    extra: dict[str, Any] = {}
+    if lora and lora.strip():
+        if not is_acestep:
+            raise ValueError("LoRA adapters are only supported with ACE-Step models.")
+        from anvil_audio.lora import resolve_adapter_reference
+
+        lora_path, lora_entry = resolve_adapter_reference(lora)
+        apply_lora = getattr(pipeline, "apply_lora_adapter", None)
+        if not callable(apply_lora):
+            raise RuntimeError("Selected ACE-Step pipeline does not support LoRA loading.")
+        lora_status = apply_lora(
+            str(lora_path),
+            adapter_name=lora_adapter_name.strip() or None,
+            scale=float(lora_scale),
+        )
+        extra["lora"] = {
+            "reference": lora,
+            "path": str(lora_path),
+            "scale": float(lora_scale),
+            "adapter_name": lora_adapter_name.strip() or None,
+            "registry_id": lora_entry.id if lora_entry else None,
+            "status": lora_status,
+        }
 
     gen_kwargs: dict[str, Any] = {"cfg_scale": effective_cfg}
     if not is_acestep:
@@ -261,7 +288,6 @@ def _run_generate(
     audio = audio[:, :length]
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    extra: dict[str, Any] = {}
     if is_acestep and lyrics:
         extra["lyrics"] = lyrics
 
@@ -348,6 +374,9 @@ def generate_audio(
     fmt: str = "wav",
     project: str = "",
     lyrics: str = "",
+    lora: str = "",
+    lora_scale: float = 1.0,
+    lora_adapter_name: str = "",
 ) -> dict[str, Any]:
     """Generate audio from a text prompt using a registered model.
 
@@ -376,6 +405,11 @@ def generate_audio(
                  omitted (set with set_active_project).
         lyrics: Lyric text for ACE-Step models. Use section markers like
                 [verse], [chorus], [bridge]. Leave blank for instrumental.
+        lora: ACE-Step adapter id/name from `list_lora_adapters`, or a direct
+              PEFT/LoKr adapter path. Leave blank for no adapter.
+        lora_scale: Adapter strength. 1.0 = full strength; lower values blend
+                    with the base model.
+        lora_adapter_name: Optional runtime adapter name for ACE-Step.
 
     Returns:
         dict with keys: path (str), sidecar_path (str), metadata (dict)
@@ -394,6 +428,9 @@ def generate_audio(
             project=project,
             lyrics=lyrics,
             negative_prompt=negative_prompt,
+            lora=lora,
+            lora_scale=lora_scale,
+            lora_adapter_name=lora_adapter_name,
         )
     except Exception as exc:
         return {"error": str(exc)}
@@ -408,8 +445,9 @@ def batch_generate(
 
     Each item in the list is a condition dict with the same keys as
     generate_audio: prompt (required), model, duration_seconds, steps,
-    cfg_scale, seed, fmt, lyrics, negative_prompt. Items using the same model share the
-    cached pipeline — no reload penalty.
+    cfg_scale, seed, fmt, lyrics, negative_prompt, lora, lora_scale, and
+    lora_adapter_name. Items using the same model share the cached pipeline —
+    no reload penalty.
 
     Args:
         items: List of condition dicts. Each must have at least "prompt".
@@ -444,6 +482,9 @@ def batch_generate(
                 project=item.get("project", "") or project,
                 lyrics=str(item.get("lyrics", "")),
                 negative_prompt=str(item.get("negative_prompt", "")),
+                lora=str(item.get("lora", "")),
+                lora_scale=float(item.get("lora_scale", 1.0)),
+                lora_adapter_name=str(item.get("lora_adapter_name", "")),
             )
             results.append(result)
         except Exception as exc:
@@ -633,6 +674,35 @@ def edit_audio(
 
 
 @mcp.tool()
+def list_lora_adapters() -> list[dict[str, Any]]:
+    """List locally registered LoRA adapters that MCP generation can reference.
+
+    Returns:
+        List of adapter metadata dicts. Use the `id` value as generate_audio.lora
+        or batch_generate item `lora`. Adapters with `loadable=false` are tracked
+        but cannot be applied by ACE-Step's Python runtime.
+    """
+    from anvil_audio.lora import list_adapters
+
+    return [
+        {
+            "id": entry.id,
+            "name": entry.name,
+            "path": entry.path,
+            "format": entry.format,
+            "loadable": entry.loadable,
+            "source": entry.source,
+            "base_model": entry.base_model,
+            "repo_id": entry.repo_id,
+            "revision": entry.revision,
+            "created_at": entry.created_at,
+            "notes": entry.notes,
+        }
+        for entry in list_adapters()
+    ]
+
+
+@mcp.tool()
 def list_models() -> list[dict[str, Any]]:
     """List all registered models with their capabilities and current status.
 
@@ -646,7 +716,13 @@ def list_models() -> list[dict[str, Any]]:
         features: list[str] = []
         if entry.pipeline_type == "acestep":
             features.extend(
-                ["lyrics", "negative-prompt", "music-generation", "style-tags"]
+                [
+                    "lyrics",
+                    "negative-prompt",
+                    "music-generation",
+                    "style-tags",
+                    "lora",
+                ]
             )
         else:
             features.extend(
@@ -689,7 +765,9 @@ def get_model_info(model: str) -> dict[str, Any]:
 
     features: list[str] = []
     if entry.pipeline_type == "acestep":
-        features.extend(["lyrics", "negative-prompt", "music-generation", "style-tags"])
+        features.extend(
+            ["lyrics", "negative-prompt", "music-generation", "style-tags", "lora"]
+        )
     else:
         features.extend(
             [

@@ -1,5 +1,8 @@
 """Tests for Gradio runtime theme helpers."""
 
+import json
+
+from anvil_audio.lora import import_local_adapter
 from anvil_audio.interface import gradio as gradio_ui
 
 
@@ -70,3 +73,21 @@ def test_github_star_html_points_to_public_repo():
     assert 'target="_blank"' in html
     assert 'rel="noopener noreferrer"' in html
     assert "Star on GitHub" in html
+
+
+def test_lora_dropdown_choices_include_registered_loadable_adapters(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("ANVIL_AUDIO_LORA_DIR", str(tmp_path / "lora-cache"))
+    source = tmp_path / "adapter"
+    source.mkdir()
+    (source / "adapter_config.json").write_text(
+        json.dumps({"peft_type": "LORA"}), encoding="utf-8"
+    )
+    (source / "adapter_model.safetensors").write_bytes(b"placeholder")
+    import_local_adapter(source, name="Dark Blues")
+
+    choices = gradio_ui._lora_dropdown_choices()
+
+    assert ("No adapter", "") in choices
+    assert ("Dark Blues (dark-blues)", "dark-blues") in choices

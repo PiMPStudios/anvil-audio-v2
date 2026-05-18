@@ -272,7 +272,7 @@ def test_apply_lora_adapter_delegates_to_acestep_handler(monkeypatch, tmp_path):
 
     adapter_dir = tmp_path / "adapter"
     adapter_dir.mkdir()
-    pipe = ACEStepPipeline(project_root=str(tmp_path), device="cpu")
+    pipe = ACEStepPipeline(project_root=str(tmp_path), device="cpu", use_mlx_dit=False)
 
     status = pipe.apply_lora_adapter(
         str(adapter_dir),
@@ -291,3 +291,26 @@ def test_apply_lora_adapter_delegates_to_acestep_handler(monkeypatch, tmp_path):
     assert calls["enabled"] is True
     assert status["adapter_name"] == "style"
     assert second["message"] == "Adapter already loaded: style"
+
+
+def test_apply_lora_adapter_rejects_native_mlx_dit(monkeypatch, tmp_path):
+    """Native MLX DiT currently bypasses ACE-Step's PyTorch LoRA injection."""
+
+    class FakeAceStepHandler:
+        def initialize_service(self, **kwargs):
+            return "ok", True
+
+    acestep_pkg = types.ModuleType("acestep")
+    handler_mod = types.ModuleType("acestep.handler")
+    handler_mod.AceStepHandler = FakeAceStepHandler
+    monkeypatch.setitem(sys.modules, "acestep", acestep_pkg)
+    monkeypatch.setitem(sys.modules, "acestep.handler", handler_mod)
+
+    from anvil_audio.pipelines.acestep import ACEStepPipeline
+
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    pipe = ACEStepPipeline(project_root=str(tmp_path), device="cpu", use_mlx_dit=True)
+
+    with pytest.raises(RuntimeError, match="PyTorch DiT backend"):
+        pipe.apply_lora_adapter(str(adapter_dir))

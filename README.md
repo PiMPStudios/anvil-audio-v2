@@ -560,8 +560,22 @@ anvil generate --model acestep-v1.5-sft \
 ```
 
 Use an adapter in Gradio by loading an ACE-Step model, opening the
-**ACE-Step LoRA** accordion, and entering a registered adapter id/name or a
-direct PEFT/LoKr path.
+**ACE-Step LoRA** accordion, and selecting a registered adapter from the
+dropdown. You can still paste a direct PEFT/LoKr path as a custom value.
+
+On Apple Silicon, ACE-Step normally uses Anvil's native MLX DiT path for speed.
+Current PEFT/LoKr adapters patch ACE-Step's PyTorch DiT modules, so LoRA
+generation must use the PyTorch DiT backend for now:
+
+```bash
+ANVIL_ACESTEP_USE_MLX_DIT=0 python ./run_gradio.py
+ANVIL_ACESTEP_USE_MLX_DIT=0 anvil generate --model acestep-v1.5-sft \
+    --prompt "my_style, dark blues noir rock" \
+    --lora my-style
+```
+
+If MLX DiT is active and a LoRA is selected, Anvil fails loudly instead of
+pretending the adapter affected the audio.
 
 Anvil does not scan other applications for adapters. Keep this repo's LoRA path
 explicit: train an adapter here, import a local PEFT/LoKr folder, or import a
@@ -825,6 +839,7 @@ The MCP runtime is included in the default install. If you installed with
 | `generate_audio` | Generate a clip from a prompt; auto-selects model if not specified |
 | `batch_generate` | Generate multiple clips in one call |
 | `edit_audio` | Post-process a file with normalize, trim, EQ, reverb, etc. |
+| `list_lora_adapters` | List registered LoRA adapters for ACE-Step generation |
 | `list_models` | All registered models with type, limits, and loaded status |
 | `get_model_info` | Full details for one model |
 | `list_recent_outputs` | Recent output files with their metadata, newest-first |
@@ -835,6 +850,20 @@ The MCP runtime is included in the default install. If you installed with
 All `generate_audio` and `batch_generate` responses include `generation_duration_seconds` —
 the wall-clock time from the start of inference to the file being written. This lets you
 compare backends directly (e.g. PyTorch MPS vs MLX) without any external timing.
+
+ACE-Step generation tools also accept `lora`, `lora_scale`, and
+`lora_adapter_name`. Use `list_lora_adapters` to discover registered adapter
+IDs, then pass the adapter id or a direct PEFT/LoKr path:
+
+```text
+generate_audio(
+  prompt="dark blues noir rock, raw guitar, smoky male vocal",
+  model="acestep-v1.5-sft",
+  lora="dark-blues-h200-sft",
+  lora_scale=0.75,
+  negative_prompt="muddy mix, harsh treble, weak drums"
+)
+```
 
 Models are loaded lazily on first use and cached between calls — switching between
 two models during a session only pays the load cost once per model.

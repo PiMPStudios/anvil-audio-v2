@@ -13,6 +13,9 @@ Use these docs when you want more detail:
   fine-tuning, and future training automation.
 - [Dataset separation plan](dataset-separation-plan.md) - branch-level plan for
   source separation, stem sidecars, stem-aware QA, and training-bundle exports.
+- [Gradio Training Studio plan](gradio-training-studio-plan.md) - proposed UI
+  plan for dataset review, source separation, cloud training, and adapter
+  review inside Gradio.
 - [Stable Audio Open](Stable_Audio_Open.md) - inherited Stable Audio Open 1.0
   generation notes and HuggingFace access guidance.
 - [Diffusion](diffusion.md), [conditioning](conditioning.md),

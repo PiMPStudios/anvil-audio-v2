@@ -219,6 +219,31 @@ def _theme_dropdown_choices() -> list[tuple[str, str]]:
     return [(label, value) for value, label, _description in _THEME_PRESETS]
 
 
+def _lora_dropdown_choices() -> list[tuple[str, str]]:
+    """Return loadable LoRA adapters for the Gradio picker."""
+    from anvil_audio.lora import list_adapters
+
+    choices = [("No adapter", "")]
+    for entry in list_adapters():
+        if not entry.loadable:
+            continue
+        label = entry.name if entry.name == entry.id else f"{entry.name} ({entry.id})"
+        choices.append((label, entry.id))
+    return choices
+
+
+def _refresh_lora_dropdown(current_value: str | None = None) -> Any:
+    """Refresh the LoRA picker without dropping a typed custom path."""
+    import gradio as gr
+
+    choices = _lora_dropdown_choices()
+    values = {value for _label, value in choices}
+    value = (current_value or "").strip()
+    if value and value not in values:
+        return gr.update(choices=choices, value=value)
+    return gr.update(choices=choices, value=value if value in values else "")
+
+
 def _theme_markdown(value: str) -> str:
     descriptions = {
         theme_id: description for theme_id, _label, description in _THEME_PRESETS
@@ -2232,10 +2257,17 @@ def create_unified_txt2music_ui(
     with gr.Group(visible=is_acestep) as lora_controls:
         with gr.Accordion("ACE-Step LoRA", open=False):
             with gr.Row():
-                lora_reference = gr.Textbox(
+                lora_reference = gr.Dropdown(
+                    choices=_lora_dropdown_choices(),
+                    value="",
                     label="Adapter",
-                    placeholder="Registered adapter id/name or PEFT/LoKr path",
-                    info="Use `anvil lora list` to see registered adapters.",
+                    allow_custom_value=True,
+                    filterable=True,
+                    info=(
+                        "Pick a registered adapter or paste a PEFT/LoKr path. "
+                        "Use refresh after importing a new adapter."
+                    ),
+                    scale=3,
                 )
                 lora_scale = gr.Slider(
                     minimum=0.0,
@@ -2245,6 +2277,14 @@ def create_unified_txt2music_ui(
                     label="LoRA scale",
                     info="Adapter strength. 1.0 is full strength; lower values blend with the base model.",
                 )
+                lora_refresh = gr.Button("↻ Refresh", variant="secondary", scale=1)
+
+            lora_refresh.click(
+                fn=_refresh_lora_dropdown,
+                inputs=[lora_reference],
+                outputs=[lora_reference],
+                show_progress="hidden",
+            )
 
     # 3. Generation controls — single row
     with gr.Row():

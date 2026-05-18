@@ -662,6 +662,15 @@ class ACEStepPipeline(BasePipeline):
         wrapper makes the operation idempotent for the common case where the UI
         or CLI sends the same adapter path across multiple generations.
         """
+        if self._use_mlx_dit:
+            raise RuntimeError(
+                "ACE-Step LoRA adapters currently require the PyTorch DiT "
+                "backend. Native MLX DiT generation is active, so the adapter "
+                "would not affect the generated audio. Restart with "
+                "ANVIL_ACESTEP_USE_MLX_DIT=0 or set the registry param "
+                "`use_mlx_dit: false` for this model before using LoRA."
+            )
+
         path = str(Path(lora_path).expanduser().resolve())
         effective_name = adapter_name or Path(path).name
 
