@@ -106,6 +106,12 @@ then runs `scripts/run_training.sh`. Passing `--collect` also runs
 `scripts/collect.sh` and syncs `outputs/` plus `logs/` back into
 `remote_artifacts/`.
 
+The generated bootstrap creates a system-site-packages venv so managed GPU
+images can keep their baked-in CUDA/PyTorch stack. It installs Anvil from the
+selected branch, installs ACE-Step's training dependencies separately, and then
+installs ACE-Step with dependency resolution disabled so ACE-Step's exact torch
+pin does not replace the provider image's working torch build.
+
 Useful RunPod follow-ups:
 
 ```bash
@@ -147,7 +153,8 @@ Expected behavior:
 - create clearly tagged cloud instances
 - store the remote instance ID locally
 - verify CUDA and `nvidia-smi`
-- install Anvil, ACE-Step extras, and training dependencies idempotently
+- install Anvil, ACE-Step, and training dependencies idempotently without
+  replacing the provider image's CUDA/PyTorch stack
 - sync dataset/config to the remote machine
 - run training inside `tmux`, `screen`, or a supervised service
 - stream logs locally

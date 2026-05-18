@@ -56,7 +56,9 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert bootstrap.stat().st_mode & stat.S_IXUSR
     bootstrap_text = bootstrap.read_text(encoding="utf-8")
     assert "third_parts/nano-vllm" in bootstrap_text
+    assert "venv --system-site-packages .venv" in bootstrap_text
     assert 'pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python' in bootstrap_text
+    assert 'pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python' in bootstrap_text
 
 
 def test_create_cloud_job_package_fails_without_primary_assets(tmp_path):

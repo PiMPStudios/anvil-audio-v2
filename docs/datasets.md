@@ -254,6 +254,12 @@ The package copies the selected assets under `inputs/dataset`, rewrites
 `captions.json` so the selected `--primary-asset` is the training file, and
 writes remote scripts for bootstrap, training, and collection.
 
+On managed CUDA images, the generated `bootstrap.sh` keeps the image's existing
+PyTorch install by creating a system-site-packages venv. ACE-Step is installed
+after its non-torch training dependencies with dependency resolution disabled,
+which avoids torch pin conflicts on provider images such as RunPod's PyTorch
+templates.
+
 Preview an SSH run before touching the remote box:
 
 ```bash

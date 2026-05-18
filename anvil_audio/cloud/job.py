@@ -16,6 +16,33 @@ CLOUD_JOB_VERSION = "0.1"
 DEFAULT_RECIPE = "lora-balanced"
 DEFAULT_REPO_URL = "https://github.com/PiMPStudios/anvil-audio-v2.git"
 ASSET_NAMES = ("full-mix", "instrumental", "vocals", "drums", "bass", "other")
+ACESTEP_REPO_URL = "https://github.com/ace-step/ACE-Step-1.5.git"
+ACESTEP_BOOTSTRAP_DEPENDENCIES = (
+    "transformers>=4.51.0,<4.58.0",
+    "diffusers>=0.37.0",
+    "matplotlib>=3.7.5",
+    "scipy>=1.10.1",
+    "soundfile>=0.13.1",
+    "loguru>=0.7.3",
+    "einops>=0.8.1",
+    "accelerate>=1.12.0",
+    "fastapi>=0.110.0",
+    "diskcache",
+    "uvicorn[standard]>=0.27.0",
+    "numba>=0.63.1",
+    "vector-quantize-pytorch>=1.27.15",
+    "torchcodec>=0.9.1",
+    "torchao>=0.16.0,<0.17.0",
+    "toml",
+    "peft>=0.18.0",
+    "lycoris-lora",
+    "lightning>=2.0.0",
+    "tensorboard>=2.20.0",
+    "modelscope",
+    "typer-slim>=0.21.1",
+    "pytorch-wavelets>=1.3.0",
+    "pywavelets>=1.9.0",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,7 +355,8 @@ def _job_payload(
         "runtime": {
             "repo_url": repo_url,
             "repo_ref": repo_ref,
-            "install_spec": f"anvil-audio[acestep] @ git+{repo_url}@{repo_ref}",
+            "install_spec": f"anvil-audio @ git+{repo_url}@{repo_ref}",
+            "acestep_install_spec": f"ace-step @ git+{ACESTEP_REPO_URL}",
         },
         "paths": {
             "dataset_dir": "inputs/dataset",
@@ -348,6 +376,10 @@ def _write_scripts(job_dir: Path, job: dict[str, Any]) -> None:
 
 def _bootstrap_script(job: dict[str, Any]) -> str:
     install_spec = str(job["runtime"]["install_spec"])
+    acestep_install_spec = str(job["runtime"]["acestep_install_spec"])
+    acestep_dependencies = " \\\n  ".join(
+        f'"{dependency}"' for dependency in ACESTEP_BOOTSTRAP_DEPENDENCIES
+    )
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
@@ -355,19 +387,31 @@ JOB_ROOT="$(cd "$(dirname "${{BASH_SOURCE[0]}}")/.." && pwd)"
 cd "$JOB_ROOT"
 
 PYTHON_BIN="${{PYTHON_BIN:-python3}}"
+if [ -d .venv ] && [[ "$(uname -s)" == "Linux" ]] && ! grep -q "include-system-site-packages = true" .venv/pyvenv.cfg 2>/dev/null; then
+  rm -rf .venv
+fi
 if [ ! -d .venv ]; then
-  "$PYTHON_BIN" -m venv .venv
+  "$PYTHON_BIN" -m venv --system-site-packages .venv
 fi
 
 source .venv/bin/activate
+python - <<'PY' || true
+import torch
+print(f"Using torch {{torch.__version__}} from {{torch.__file__}}")
+PY
 python -m pip install --upgrade pip wheel setuptools
 ANVIL_AUDIO_INSTALL="${{ANVIL_AUDIO_INSTALL:-{install_spec}}}"
+ACESTEP_INSTALL="${{ACESTEP_INSTALL:-{acestep_install_spec}}}"
 if [[ "$(uname -s)" == "Linux" ]]; then
   python -m pip install \\
-    "git+https://github.com/ace-step/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm" \\
+    "git+{ACESTEP_REPO_URL}#subdirectory=acestep/third_parts/nano-vllm" \\
     --ignore-requires-python
 fi
 python -m pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python
+python -m pip install \\
+  {acestep_dependencies} \\
+  --ignore-requires-python
+python -m pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python
 anvil setup || true
 """
 

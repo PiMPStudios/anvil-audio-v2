@@ -656,6 +656,11 @@ the UI shows featured GPUs. For `--gpu-type`, use the `gpuId` value from
 `runpodctl gpu list`; for example, H200 SXM is `NVIDIA H200`. Use
 `anvil cloud runpod terminate POD_ID` when the run is done.
 
+Cloud bootstrap reuses the provider image's CUDA/PyTorch stack via a
+system-site-packages venv, then installs Anvil and ACE-Step without letting
+ACE-Step replace the image's torch build. This avoids torch resolver conflicts
+on managed GPU images.
+
 ---
 
 ## Troubleshooting
