@@ -661,7 +661,9 @@ system-site-packages venv, then installs Anvil and ACE-Step without letting
 ACE-Step replace the image's torch build. This avoids torch resolver conflicts
 on managed GPU images. Remote uploads preserve `.venv`, `work`, `outputs`, and
 `logs` so rerunning with `--skip-bootstrap` does not delete the remote runtime
-state.
+state. Bootstrap also ensures the required ACE-Step checkpoints exist before
+training: the shared main bundle for `vae`/text components plus the selected
+DiT variant, such as `acestep-v15-sft` for `--model-variant sft`.
 
 ---
 

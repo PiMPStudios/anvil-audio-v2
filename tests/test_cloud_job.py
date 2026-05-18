@@ -51,12 +51,16 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert job["primary_asset"] == "instrumental"
     assert job["runtime"]["repo_ref"] == "feature-cloud"
     assert job["training"]["recipe"] == "lora-balanced"
+    assert job["training"]["checkpoint_models"] == ["main", "acestep-v15-sft"]
 
     bootstrap = output_dir / "scripts/bootstrap.sh"
     assert bootstrap.stat().st_mode & stat.S_IXUSR
     bootstrap_text = bootstrap.read_text(encoding="utf-8")
     assert "third_parts/nano-vllm" in bootstrap_text
     assert "venv --system-site-packages .venv" in bootstrap_text
+    assert "download_main_model" in bootstrap_text
+    assert "download_submodel" in bootstrap_text
+    assert 'REQUIRED_CHECKPOINT_MODELS=\'["main", "acestep-v15-sft"]\'' in bootstrap_text
     assert 'pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python' in bootstrap_text
     assert 'pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python' in bootstrap_text
 

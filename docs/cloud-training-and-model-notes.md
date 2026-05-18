@@ -112,7 +112,12 @@ selected branch, installs ACE-Step's training dependencies separately, and then
 installs ACE-Step with dependency resolution disabled so ACE-Step's exact torch
 pin does not replace the provider image's working torch build. Remote uploads
 preserve `.venv`, `work`, `outputs`, and `logs`, so a later `--skip-bootstrap`
-training run does not erase the environment created by bootstrap.
+training run does not erase the environment created by bootstrap. Bootstrap
+also verifies the required ACE-Step checkpoints before training. Every job
+needs the shared main bundle for `vae` and text components, and non-turbo jobs
+also fetch their selected DiT checkpoint, such as `acestep-v15-sft` for SFT.
+Set `ANVIL_SKIP_CHECKPOINT_DOWNLOAD=1` only when the remote checkpoint cache is
+already populated or mounted somewhere else.
 
 Useful RunPod follow-ups:
 

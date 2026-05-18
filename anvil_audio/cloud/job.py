@@ -17,6 +17,14 @@ DEFAULT_RECIPE = "lora-balanced"
 DEFAULT_REPO_URL = "https://github.com/PiMPStudios/anvil-audio-v2.git"
 ASSET_NAMES = ("full-mix", "instrumental", "vocals", "drums", "bass", "other")
 ACESTEP_REPO_URL = "https://github.com/ace-step/ACE-Step-1.5.git"
+ACESTEP_VARIANT_CHECKPOINTS = {
+    "turbo": (),
+    "base": ("acestep-v15-base",),
+    "sft": ("acestep-v15-sft",),
+    "xl_turbo": ("acestep-v15-xl-turbo",),
+    "xl_base": ("acestep-v15-xl-base",),
+    "xl_sft": ("acestep-v15-xl-sft",),
+}
 ACESTEP_BOOTSTRAP_DEPENDENCIES = (
     "transformers>=4.51.0,<4.58.0",
     "diffusers>=0.37.0",
@@ -331,6 +339,9 @@ def _job_payload(
             "max_hours": config.max_hours,
             "max_seconds": max_seconds,
             "checkpoint_dir": config.checkpoint_dir,
+            "checkpoint_models": list(
+                _checkpoint_models_for_variant(config.model_variant)
+            ),
             "device": "cuda",
             "lyrics": "[Instrumental]",
             "genre": str(bundle.get("dataset_name") or ""),
@@ -377,6 +388,9 @@ def _write_scripts(job_dir: Path, job: dict[str, Any]) -> None:
 def _bootstrap_script(job: dict[str, Any]) -> str:
     install_spec = str(job["runtime"]["install_spec"])
     acestep_install_spec = str(job["runtime"]["acestep_install_spec"])
+    training = job["training"]
+    checkpoint_dir = str(training["checkpoint_dir"])
+    checkpoint_models = json.dumps(training["checkpoint_models"])
     acestep_dependencies = " \\\n  ".join(
         f'"{dependency}"' for dependency in ACESTEP_BOOTSTRAP_DEPENDENCIES
     )
@@ -412,6 +426,51 @@ python -m pip install \\
   {acestep_dependencies} \\
   --ignore-requires-python
 python -m pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python
+CHECKPOINT_DIR="${{ANVIL_CHECKPOINT_DIR:-{checkpoint_dir}}}"
+REQUIRED_CHECKPOINT_MODELS='{checkpoint_models}'
+if [[ "${{ANVIL_SKIP_CHECKPOINT_DOWNLOAD:-0}}" != "1" ]]; then
+  export CHECKPOINT_DIR REQUIRED_CHECKPOINT_MODELS
+  python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+from acestep.model_downloader import (
+    check_main_model_exists,
+    check_model_exists,
+    download_main_model,
+    download_submodel,
+)
+
+checkpoint_dir = Path(os.environ["CHECKPOINT_DIR"]).expanduser()
+required_models = json.loads(os.environ["REQUIRED_CHECKPOINT_MODELS"])
+token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+prefer_source = os.environ.get("ACESTEP_DOWNLOAD_SOURCE") or None
+
+if "main" in required_models and not check_main_model_exists(checkpoint_dir):
+    success, message = download_main_model(
+        checkpoint_dir,
+        token=token,
+        prefer_source=prefer_source,
+    )
+    if not success:
+        raise SystemExit(message)
+
+for model_name in required_models:
+    if model_name == "main":
+        continue
+    if check_model_exists(model_name, checkpoint_dir):
+        continue
+    success, message = download_submodel(
+        model_name,
+        checkpoint_dir,
+        token=token,
+        prefer_source=prefer_source,
+    )
+    if not success:
+        raise SystemExit(message)
+PY
+fi
 anvil setup || true
 """
 
@@ -533,6 +592,15 @@ def _detect_git_ref() -> str | None:
         if value:
             return value
     return None
+
+
+def _checkpoint_models_for_variant(model_variant: str) -> tuple[str, ...]:
+    variant_key = model_variant.replace("-", "_")
+    variant_models = ACESTEP_VARIANT_CHECKPOINTS.get(
+        variant_key,
+        (model_variant,) if model_variant.startswith("acestep-") else (),
+    )
+    return ("main", *variant_models)
 
 
 def _slugify(value: str) -> str:

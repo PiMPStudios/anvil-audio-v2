@@ -258,7 +258,9 @@ On managed CUDA images, the generated `bootstrap.sh` keeps the image's existing
 PyTorch install by creating a system-site-packages venv. ACE-Step is installed
 after its non-torch training dependencies with dependency resolution disabled,
 which avoids torch pin conflicts on provider images such as RunPod's PyTorch
-templates.
+templates. Bootstrap also downloads any required ACE-Step checkpoints that are
+missing on the remote cache. For SFT LoRA training, that means the shared main
+bundle, including `vae`, plus `acestep-v15-sft`.
 
 Preview an SSH run before touching the remote box:
 
