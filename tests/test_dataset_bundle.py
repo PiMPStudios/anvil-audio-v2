@@ -44,6 +44,26 @@ def test_export_training_bundle_warns_for_missing_optional_assets(tmp_path):
     assert result.warnings == ["missing asset path for drums"]
 
 
+def test_export_training_bundle_groups_repeated_missing_asset_warnings(tmp_path):
+    dataset = _write_bundle_dataset(tmp_path)
+    captions = json.loads((dataset / "captions.json").read_text(encoding="utf-8"))
+    for index in range(2):
+        captions.append(
+            {
+                "file": "clips/clip_0001.wav",
+                "caption": f"another clip {index}",
+                "separation": {"stems": {}},
+            }
+        )
+    (dataset / "captions.json").write_text(json.dumps(captions), encoding="utf-8")
+
+    result = export_training_bundle(
+        TrainingBundleConfig(dataset_dir=dataset, include=("instrumental",))
+    )
+
+    assert result.warnings == ["missing asset path for instrumental (2 clips)"]
+
+
 def test_parse_include_normalizes_and_dedupes():
     assert parse_include("full-mix, vocals, vocals") == ("full-mix", "vocals")
 

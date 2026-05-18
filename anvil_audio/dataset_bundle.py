@@ -48,7 +48,7 @@ def export_training_bundle(config: TrainingBundleConfig) -> TrainingBundleResult
 
     manifest = _load_json_object(manifest_path)
     include = _normalize_include(config.include)
-    warnings: list[str] = []
+    warning_counts: dict[str, int] = {}
     clips: list[dict[str, Any]] = []
     asset_count = 0
     for index, record in enumerate(records, start=1):
@@ -59,12 +59,13 @@ def export_training_bundle(config: TrainingBundleConfig) -> TrainingBundleResult
             index=index,
             record=record,
             include=include,
-            warnings=warnings,
+            warning_counts=warning_counts,
             strict=config.strict,
         )
         asset_count += len(clip_payload["assets"])
         clips.append(clip_payload)
 
+    warnings = _format_warning_counts(warning_counts)
     bundle = {
         "anvil_training_bundle_version": BUNDLE_VERSION,
         "created_at": datetime.now(UTC).isoformat(),
@@ -105,7 +106,7 @@ def _bundle_clip(
     index: int,
     record: dict[str, Any],
     include: tuple[str, ...],
-    warnings: list[str],
+    warning_counts: dict[str, int],
     strict: bool,
 ) -> dict[str, Any]:
     file_value = str(record.get("file") or "")
@@ -116,7 +117,7 @@ def _bundle_clip(
             name="full-mix",
             file_value=file_value,
             dataset_dir=dataset_dir,
-            warnings=warnings,
+            warning_counts=warning_counts,
             strict=strict,
         )
 
@@ -132,7 +133,7 @@ def _bundle_clip(
             name=name,
             file_value=_stem_file(stems.get(name)),
             dataset_dir=dataset_dir,
-            warnings=warnings,
+            warning_counts=warning_counts,
             strict=strict,
         )
 
@@ -156,23 +157,33 @@ def _add_asset(
     name: str,
     file_value: str,
     dataset_dir: Path,
-    warnings: list[str],
+    warning_counts: dict[str, int],
     strict: bool,
 ) -> None:
     if not file_value:
         message = f"missing asset path for {name}"
         if strict:
             raise FileNotFoundError(message)
-        warnings.append(message)
+        warning_counts[message] = warning_counts.get(message, 0) + 1
         return
     path = dataset_dir / file_value
     if not path.is_file():
         message = f"missing asset file for {name}: {file_value}"
         if strict:
             raise FileNotFoundError(message)
-        warnings.append(message)
+        warning_counts[message] = warning_counts.get(message, 0) + 1
         return
     assets[name] = file_value
+
+
+def _format_warning_counts(warning_counts: dict[str, int]) -> list[str]:
+    warnings: list[str] = []
+    for message, count in sorted(warning_counts.items()):
+        if count == 1:
+            warnings.append(message)
+        else:
+            warnings.append(f"{message} ({count} clips)")
+    return warnings
 
 
 def _normalize_include(include: tuple[str, ...]) -> tuple[str, ...]:
