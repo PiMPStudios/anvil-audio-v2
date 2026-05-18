@@ -200,6 +200,8 @@ The first implementation slice adds:
 - clip sidecar, `captions.json`, and `dataset_manifest.json` updates
 - `anvil dataset qa --include-stems` for missing stem, near-silence, clipping,
   and duration-mismatch checks
+- `anvil dataset captions` audit/repair for exact duplicate and low-confidence
+  captions
 - `anvil dataset export-training-bundle` for stable local/cloud handoff
 
 `audio-separator` should run from an isolated tool environment for now. Its

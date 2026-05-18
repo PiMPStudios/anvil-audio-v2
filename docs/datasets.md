@@ -192,6 +192,35 @@ anvil dataset qa ./datasets/my_style_YYYYMMDD_HHMMSS --include-stems
 Stem-aware QA flags missing stem files, near-silent stems, possible clipping,
 and duration mismatches against the source clip.
 
+## Caption Audit and Repair
+
+If QA reports many duplicate or low-confidence captions, audit the caption file:
+
+```bash
+anvil dataset captions ./datasets/my_style_YYYYMMDD_HHMMSS
+```
+
+To deterministically rebuild weak captions from source titles, audio analysis,
+style hints, and stem metadata, run repair mode as a dry run first:
+
+```bash
+anvil dataset captions ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --repair \
+    --style-hint "dark blues, slow guitar, atmospheric vocals"
+```
+
+Then write the repaired captions when the report looks right:
+
+```bash
+anvil dataset captions ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --repair \
+    --write \
+    --style-hint "dark blues, slow guitar, atmospheric vocals"
+```
+
+This updates `captions.json`, matching clip sidecars, and records
+`caption_repair` metadata in `dataset_manifest.json`.
+
 ## Training Bundle Export
 
 After clips, captions, optional stems, and QA look reasonable, export a stable

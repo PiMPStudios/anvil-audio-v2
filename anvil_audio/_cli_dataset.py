@@ -19,6 +19,10 @@ from anvil_audio.dataset_bundle import (
     export_training_bundle,
     parse_include,
 )
+from anvil_audio.dataset_captions import (
+    CaptionAuditConfig,
+    audit_or_repair_captions,
+)
 from anvil_audio.dataset_qa import (
     DEFAULT_EMBEDDING_INSTRUCTION,
     DatasetQAConfig,
@@ -233,6 +237,38 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail if any requested asset is missing.",
     )
+
+    captions = subparsers.add_parser(
+        "captions",
+        help="Audit or repair duplicate/low-confidence dataset captions.",
+    )
+    captions.add_argument("dataset_dir", help="Directory produced by `anvil dataset`.")
+    captions.add_argument(
+        "--repair",
+        action="store_true",
+        help="Generate deterministic replacement captions for weak duplicates.",
+    )
+    captions.add_argument(
+        "--write",
+        action="store_true",
+        help="Write repaired captions. Without this, repair mode is a dry run.",
+    )
+    captions.add_argument(
+        "--style-hint",
+        default="",
+        help="Optional style hint to blend into repaired captions.",
+    )
+    captions.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.62,
+        help="Captions below this confidence are repair candidates. Default: 0.62.",
+    )
+    captions.add_argument(
+        "--output",
+        default=None,
+        help="Output audit JSON path. Default: DATASET_DIR/caption_audit_report.json.",
+    )
     return parser
 
 
@@ -306,6 +342,25 @@ def main() -> None:
             print(f"training bundle export failed: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
         _print_bundle_result(result)
+        return
+
+    if args.command == "captions":
+        mode = "heuristic" if args.repair else "audit"
+        try:
+            result = audit_or_repair_captions(
+                CaptionAuditConfig(
+                    dataset_dir=Path(args.dataset_dir),
+                    mode=mode,
+                    write=args.write,
+                    style_hint=args.style_hint,
+                    min_confidence=args.min_confidence,
+                    output=Path(args.output) if args.output else None,
+                )
+            )
+        except Exception as exc:
+            print(f"caption audit failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_caption_audit_result(result)
         return
 
     output_dir = (
@@ -393,6 +448,16 @@ def _print_bundle_result(result) -> None:
             print(f"- {warning}")
         if len(result.warnings) > 10:
             print(f"- ... {len(result.warnings) - 10} more")
+
+
+def _print_caption_audit_result(result) -> None:
+    print(f"Caption audit: {result.report_path}")
+    print(f"Exact duplicate groups: {result.exact_duplicate_groups}")
+    print(f"Duplicate records: {result.duplicate_record_count}")
+    print(f"Low-confidence captions: {result.low_confidence_count}")
+    print(f"Repaired captions: {result.repaired_count}")
+    for warning in result.warnings:
+        print(f"- {warning}")
 
 
 def _add_common_build_args(parser: argparse.ArgumentParser) -> None:
