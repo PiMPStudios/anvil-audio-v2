@@ -362,7 +362,12 @@ fi
 source .venv/bin/activate
 python -m pip install --upgrade pip wheel setuptools
 ANVIL_AUDIO_INSTALL="${{ANVIL_AUDIO_INSTALL:-{install_spec}}}"
-python -m pip install "$ANVIL_AUDIO_INSTALL"
+if [[ "$(uname -s)" == "Linux" ]]; then
+  python -m pip install \\
+    "git+https://github.com/ace-step/ACE-Step-1.5.git#subdirectory=acestep/third_parts/nano-vllm" \\
+    --ignore-requires-python
+fi
+python -m pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python
 anvil setup || true
 """
 
