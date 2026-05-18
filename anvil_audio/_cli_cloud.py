@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -10,11 +11,16 @@ from pathlib import Path
 from anvil_audio.cloud import (
     CloudJobPackageConfig,
     GPUFindrSearch,
+    RunPodLaunchConfig,
     SSHRunConfig,
     create_cloud_job_package,
     fetch_gpufindr_offers,
     format_command,
+    launch_pod,
+    pod_status,
     run_ssh_job,
+    ssh_target_from_pod,
+    terminate_pod,
 )
 from anvil_audio.cloud.job import ASSET_NAMES, available_recipes
 
@@ -194,6 +200,89 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run collect.sh and rsync outputs/logs back after training.",
     )
+
+    runpod = subparsers.add_parser(
+        "runpod",
+        help="Launch, inspect, or terminate RunPod GPU pods.",
+    )
+    runpod_subparsers = runpod.add_subparsers(dest="runpod_command", required=True)
+
+    runpod_launch = runpod_subparsers.add_parser(
+        "launch",
+        help="Launch a RunPod pod for a packaged cloud job.",
+    )
+    runpod_launch.add_argument("job_dir", help="Directory from `anvil cloud package`.")
+    runpod_launch.add_argument(
+        "--gpu-type",
+        required=True,
+        help='RunPod GPU type id/name, e.g. "NVIDIA H200".',
+    )
+    runpod_launch.add_argument("--name", default=None, help="Optional pod name.")
+    runpod_launch.add_argument("--gpu-count", type=int, default=1)
+    runpod_launch.add_argument(
+        "--image",
+        default="runpod/pytorch:latest",
+        help="RunPod image. Default: runpod/pytorch:latest.",
+    )
+    runpod_launch.add_argument(
+        "--cloud-type",
+        default="ALL",
+        choices=("ALL", "SECURE", "COMMUNITY"),
+        help="RunPod cloud type. Default: ALL.",
+    )
+    runpod_launch.add_argument("--volume-gb", type=int, default=100)
+    runpod_launch.add_argument("--container-disk-gb", type=int, default=80)
+    runpod_launch.add_argument("--min-vcpu-count", type=int, default=8)
+    runpod_launch.add_argument("--min-memory-gb", type=int, default=48)
+    runpod_launch.add_argument(
+        "--ports",
+        default="22/tcp",
+        help='RunPod exposed ports. Default: "22/tcp".',
+    )
+    runpod_launch.add_argument(
+        "--volume-mount-path",
+        default="/workspace",
+        help="Remote mount path. Default: /workspace.",
+    )
+    runpod_launch.add_argument(
+        "--docker-args",
+        default="sleep infinity",
+        help='Container command. Default: "sleep infinity".',
+    )
+    runpod_launch.add_argument(
+        "--allowed-cuda-version",
+        action="append",
+        default=[],
+        help="Allowed CUDA version. Repeat for multiple versions.",
+    )
+    runpod_launch.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        help="Environment variable KEY=VALUE. Repeat as needed.",
+    )
+    runpod_launch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the GraphQL request without launching a pod.",
+    )
+
+    runpod_status = runpod_subparsers.add_parser(
+        "status",
+        help="Fetch RunPod pod status and SSH runtime hints.",
+    )
+    runpod_status.add_argument("pod_id", help="RunPod pod id.")
+
+    runpod_terminate = runpod_subparsers.add_parser(
+        "terminate",
+        help="Terminate a RunPod pod.",
+    )
+    runpod_terminate.add_argument("pod_id", help="RunPod pod id.")
+    runpod_terminate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the GraphQL request without terminating a pod.",
+    )
     return parser
 
 
@@ -274,6 +363,10 @@ def main() -> None:
         _print_ssh_commands(commands, dry_run=args.dry_run)
         return
 
+    if args.command == "runpod":
+        _cmd_runpod(args)
+        return
+
     parser.error(f"unknown cloud command: {args.command}")
 
 
@@ -315,6 +408,80 @@ def _print_gpu_offers(offers) -> None:
             f"{offer.reliability:>5.2f} "
             f"{offer.url}"
         )
+
+
+def _cmd_runpod(args) -> None:
+    if args.runpod_command == "launch":
+        try:
+            result = launch_pod(
+                RunPodLaunchConfig(
+                    job_dir=Path(args.job_dir),
+                    gpu_type=args.gpu_type,
+                    name=args.name,
+                    gpu_count=args.gpu_count,
+                    image_name=args.image,
+                    cloud_type=args.cloud_type,
+                    volume_gb=args.volume_gb,
+                    container_disk_gb=args.container_disk_gb,
+                    min_vcpu_count=args.min_vcpu_count,
+                    min_memory_gb=args.min_memory_gb,
+                    ports=args.ports,
+                    volume_mount_path=args.volume_mount_path,
+                    docker_args=args.docker_args,
+                    allowed_cuda_versions=tuple(args.allowed_cuda_version),
+                    env=_parse_env_pairs(args.env),
+                    dry_run=args.dry_run,
+                )
+            )
+        except Exception as exc:
+            print(f"runpod launch failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_runpod_result(result)
+        return
+
+    if args.runpod_command == "status":
+        try:
+            result = pod_status(args.pod_id)
+        except Exception as exc:
+            print(f"runpod status failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_runpod_result(result)
+        return
+
+    if args.runpod_command == "terminate":
+        try:
+            result = terminate_pod(args.pod_id, dry_run=args.dry_run)
+        except Exception as exc:
+            print(f"runpod terminate failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_runpod_result(result)
+        return
+
+    raise SystemExit(f"unknown runpod command: {args.runpod_command}")
+
+
+def _print_runpod_result(result) -> None:
+    if isinstance(result, dict) and result.get("dry_run"):
+        print(json.dumps(result["request"], indent=2, sort_keys=True))
+        return
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if isinstance(result, dict):
+        ssh_target = ssh_target_from_pod(result)
+        if ssh_target:
+            print(f"\nSSH target: {ssh_target}")
+            print("Use the printed host/port with `anvil cloud run-ssh --host ...`.")
+
+
+def _parse_env_pairs(values: list[str]) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise SystemExit(f"--env must be KEY=VALUE, got: {value}")
+        key, raw = value.split("=", 1)
+        if not key.strip():
+            raise SystemExit(f"--env key cannot be blank: {value}")
+        env[key.strip()] = raw
+    return env
 
 
 def _print_package_result(result) -> None:

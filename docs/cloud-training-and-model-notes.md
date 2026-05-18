@@ -79,6 +79,11 @@ anvil cloud package \
     --recipe lora-balanced \
     --max-hours 6
 
+export RUNPOD_API_KEY=...
+anvil cloud runpod launch ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
+    --gpu-type "NVIDIA H200" \
+    --dry-run
+
 anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
     --host ubuntu@203.0.113.10 \
     --dry-run
@@ -87,10 +92,21 @@ anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
 `anvil cloud doctor` checks for local `ssh`, `rsync`, `bash`, and `git`.
 `anvil cloud search` queries GPUFindr's read-only public catalog so users can
 see whether suitable GPUs exist before creating provider accounts or entering
-billing details. Remove `--dry-run` when the remote commands look right. The
-runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`, then runs
-`scripts/run_training.sh`. Passing `--collect` also runs `scripts/collect.sh`
-and syncs `outputs/` plus `logs/` back into `remote_artifacts/`.
+billing details. `anvil cloud runpod launch` prepares a RunPod
+`podFindAndDeployOnDemand` GraphQL request and requires `RUNPOD_API_KEY` unless
+it is run with `--dry-run`. Remove `--dry-run` when the remote commands look
+right. The runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`,
+then runs `scripts/run_training.sh`. Passing `--collect` also runs
+`scripts/collect.sh` and syncs `outputs/` plus `logs/` back into
+`remote_artifacts/`.
+
+Useful RunPod follow-ups:
+
+```bash
+anvil cloud runpod status POD_ID
+anvil cloud runpod terminate POD_ID --dry-run
+anvil cloud runpod terminate POD_ID
+```
 
 Each job package has this shape:
 

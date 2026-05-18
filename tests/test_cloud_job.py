@@ -11,6 +11,13 @@ from anvil_audio.cloud.gpufindr import (
     filter_gpufindr_offers,
 )
 from anvil_audio.cloud.job import create_cloud_job_package
+from anvil_audio.cloud.runpod import (
+    RunPodLaunchConfig,
+    build_launch_request,
+    launch_pod,
+    ssh_target_from_pod,
+    terminate_pod,
+)
 from anvil_audio.cloud.ssh import plan_ssh_run
 
 
@@ -144,6 +151,74 @@ def test_gpufindr_filter_keeps_matching_viable_offers():
     )
 
     assert [offer.id for offer in result] == ["1"]
+
+
+def test_runpod_launch_request_uses_job_and_ssh_defaults(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    job = create_cloud_job_package(
+        CloudJobPackageConfig(training_bundle=bundle, output_dir=tmp_path / "job")
+    )
+
+    request = build_launch_request(
+        RunPodLaunchConfig(
+            job_dir=job.job_dir,
+            gpu_type="NVIDIA H200",
+            name="anvil-test",
+            allowed_cuda_versions=("12.1", "12.2"),
+        )
+    )
+
+    variables = request.variables["input"]
+    assert variables["gpuTypeId"] == "NVIDIA H200"
+    assert variables["name"] == "anvil-test"
+    assert variables["ports"] == "22/tcp"
+    assert variables["dockerArgs"] == "sleep infinity"
+    assert variables["allowedCudaVersions"] == ["12.1", "12.2"]
+    assert {"key": "ANVIL_CLOUD_JOB_NAME", "value": "job"} in variables["env"]
+
+
+def test_runpod_launch_dry_run_does_not_require_api_key(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    job = create_cloud_job_package(
+        CloudJobPackageConfig(training_bundle=bundle, output_dir=tmp_path / "job")
+    )
+
+    result = launch_pod(
+        RunPodLaunchConfig(
+            job_dir=job.job_dir,
+            gpu_type="NVIDIA H200",
+            dry_run=True,
+        )
+    )
+
+    assert result["dry_run"] is True
+    assert "podFindAndDeployOnDemand" in result["request"]["query"]
+
+
+def test_runpod_terminate_dry_run_uses_pod_id():
+    result = terminate_pod("pod123", dry_run=True)
+
+    assert result["dry_run"] is True
+    assert result["request"]["variables"] == {"input": {"podId": "pod123"}}
+
+
+def test_runpod_ssh_target_from_runtime_ports():
+    target = ssh_target_from_pod(
+        {
+            "runtime": {
+                "ports": [
+                    {
+                        "ip": "203.0.113.10",
+                        "privatePort": 22,
+                        "publicPort": 32061,
+                        "type": "tcp",
+                    }
+                ]
+            }
+        }
+    )
+
+    assert target == "root@203.0.113.10 -p 32061"
 
 
 def _write_training_bundle(tmp_path):

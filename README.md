@@ -631,6 +631,11 @@ anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle.json \
     --recipe lora-balanced \
     --max-hours 6
 
+export RUNPOD_API_KEY=...
+anvil cloud runpod launch ./cloud-jobs/my_style_h200 \
+    --gpu-type "NVIDIA H200" \
+    --dry-run
+
 anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
     --host ubuntu@203.0.113.10 \
     --dry-run
@@ -643,6 +648,9 @@ later without changing the job format.
 
 `anvil cloud search` uses GPUFindr's read-only public GPU catalog to show live
 provider availability and pricing before you create an account somewhere.
+`anvil cloud runpod launch` uses RunPod's GraphQL pod API; keep `--dry-run` on
+until the request looks right, then remove it to create a pod. Use
+`anvil cloud runpod terminate POD_ID` when the run is done.
 
 ---
 
