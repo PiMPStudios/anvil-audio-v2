@@ -278,6 +278,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the GraphQL request without launching a pod.",
     )
+    runpod_launch.add_argument(
+        "--minimal",
+        action="store_true",
+        help=(
+            "Send a UI-like minimal RunPod request: GPU/count/template/SSH only. "
+            "Useful when the allocator rejects extra disk or min-spec constraints."
+        ),
+    )
 
     runpod_status = runpod_subparsers.add_parser(
         "status",
@@ -443,6 +451,7 @@ def _cmd_runpod(args) -> None:
                     docker_args=args.docker_args,
                     allowed_cuda_versions=tuple(args.allowed_cuda_version),
                     env=_parse_env_pairs(args.env),
+                    minimal=args.minimal,
                     dry_run=args.dry_run,
                 )
             )

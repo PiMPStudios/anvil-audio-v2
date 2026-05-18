@@ -651,7 +651,9 @@ provider availability and pricing before you create an account somewhere.
 `anvil cloud runpod launch` uses RunPod's GraphQL pod API; keep `--dry-run` on
 until the request looks right, then remove it to create a pod. The default
 RunPod launch uses template `runpod-torch-v280`, matching RunPod's Torch 2.8
-deploy URL. Use `anvil cloud runpod terminate POD_ID` when the run is done.
+deploy URL. Add `--minimal` if RunPod reports supply constraints even though
+the UI shows featured GPUs. Use `anvil cloud runpod terminate POD_ID` when the
+run is done.
 
 ---
 

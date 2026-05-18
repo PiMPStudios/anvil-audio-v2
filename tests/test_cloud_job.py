@@ -202,6 +202,30 @@ def test_runpod_launch_request_can_use_raw_image(tmp_path):
     assert "templateId" not in variables
 
 
+def test_runpod_launch_request_minimal_omits_extra_constraints(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    job = create_cloud_job_package(
+        CloudJobPackageConfig(training_bundle=bundle, output_dir=tmp_path / "job")
+    )
+
+    request = build_launch_request(
+        RunPodLaunchConfig(
+            job_dir=job.job_dir,
+            gpu_type="H200",
+            minimal=True,
+        )
+    )
+
+    variables = request.variables["input"]
+    assert variables["gpuTypeId"] == "H200"
+    assert variables["templateId"] == "runpod-torch-v280"
+    assert variables["startSsh"] is True
+    assert "containerDiskInGb" not in variables
+    assert "volumeInGb" not in variables
+    assert "minVcpuCount" not in variables
+    assert "minMemoryInGb" not in variables
+
+
 def test_runpod_launch_dry_run_does_not_require_api_key(tmp_path):
     bundle = _write_training_bundle(tmp_path)
     job = create_cloud_job_package(

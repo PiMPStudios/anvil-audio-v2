@@ -96,8 +96,10 @@ billing details. `anvil cloud runpod launch` prepares a RunPod
 `podFindAndDeployOnDemand` GraphQL request and requires `RUNPOD_API_KEY` unless
 it is run with `--dry-run`. The default RunPod launch uses template
 `runpod-torch-v280`, matching the deploy URLs returned by GPUFindr for RunPod
-H200/H100/A100 offers. Remove `--dry-run` when the remote commands look right.
-The runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`, then runs
+H200/H100/A100 offers. Add `--minimal` when RunPod's allocator rejects the
+extra disk or minimum machine constraints even though the UI still shows
+featured GPUs. Remove `--dry-run` when the remote commands look right. The
+runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`, then runs
 `scripts/run_training.sh`. Passing `--collect` also runs `scripts/collect.sh`
 and syncs `outputs/` plus `logs/` back into `remote_artifacts/`.
 

@@ -38,6 +38,7 @@ class RunPodLaunchConfig:
     docker_args: str = "sleep infinity"
     allowed_cuda_versions: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=dict)
+    minimal: bool = False
     api_key: str | None = None
     dry_run: bool = False
 
@@ -62,17 +63,22 @@ def build_launch_request(config: RunPodLaunchConfig) -> RunPodRequest:
     input_payload: dict[str, Any] = {
         "cloudType": config.cloud_type,
         "gpuCount": max(1, int(config.gpu_count)),
-        "volumeInGb": max(1, int(config.volume_gb)),
-        "containerDiskInGb": max(1, int(config.container_disk_gb)),
-        "minVcpuCount": max(1, int(config.min_vcpu_count)),
-        "minMemoryInGb": max(1, int(config.min_memory_gb)),
         "gpuTypeId": config.gpu_type,
         "name": config.name or f"anvil-{job_dir.name}",
-        "ports": config.ports,
         "startSsh": True,
-        "volumeMountPath": config.volume_mount_path,
-        "env": _env_list(config.env | _default_job_env(job_dir)),
     }
+    if not config.minimal:
+        input_payload.update(
+            {
+                "volumeInGb": max(1, int(config.volume_gb)),
+                "containerDiskInGb": max(1, int(config.container_disk_gb)),
+                "minVcpuCount": max(1, int(config.min_vcpu_count)),
+                "minMemoryInGb": max(1, int(config.min_memory_gb)),
+                "ports": config.ports,
+                "volumeMountPath": config.volume_mount_path,
+                "env": _env_list(config.env | _default_job_env(job_dir)),
+            }
+        )
     if config.template_id:
         input_payload["templateId"] = config.template_id
     else:
