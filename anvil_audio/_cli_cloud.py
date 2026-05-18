@@ -22,6 +22,7 @@ from anvil_audio.cloud import (
     ssh_target_from_pod,
     terminate_pod,
 )
+from anvil_audio.cloud.runpod import DEFAULT_RUNPOD_IMAGE
 from anvil_audio.cloud.job import ASSET_NAMES, available_recipes
 
 
@@ -221,8 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
     runpod_launch.add_argument("--gpu-count", type=int, default=1)
     runpod_launch.add_argument(
         "--image",
-        default="runpod/pytorch:latest",
-        help="RunPod image. Default: runpod/pytorch:latest.",
+        default=DEFAULT_RUNPOD_IMAGE,
+        help=f"RunPod image. Default: {DEFAULT_RUNPOD_IMAGE}.",
     )
     runpod_launch.add_argument(
         "--cloud-type",

@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
-DEFAULT_RUNPOD_IMAGE = "runpod/pytorch:latest"
+DEFAULT_RUNPOD_IMAGE = "runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404"
 DEFAULT_RUNPOD_PORTS = "22/tcp"
 DEFAULT_RUNPOD_VOLUME_MOUNT = "/workspace"
 

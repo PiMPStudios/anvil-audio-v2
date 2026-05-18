@@ -649,8 +649,10 @@ later without changing the job format.
 `anvil cloud search` uses GPUFindr's read-only public GPU catalog to show live
 provider availability and pricing before you create an account somewhere.
 `anvil cloud runpod launch` uses RunPod's GraphQL pod API; keep `--dry-run` on
-until the request looks right, then remove it to create a pod. Use
-`anvil cloud runpod terminate POD_ID` when the run is done.
+until the request looks right, then remove it to create a pod. The default
+RunPod image is pinned to an explicit PyTorch/CUDA tag because
+`runpod/pytorch:latest` is not published. Use `anvil cloud runpod terminate
+POD_ID` when the run is done.
 
 ---
 
