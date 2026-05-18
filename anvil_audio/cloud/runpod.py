@@ -98,7 +98,14 @@ def launch_pod(config: RunPodLaunchConfig) -> dict[str, Any]:
 
 def pod_status(pod_id: str, *, api_key: str | None = None) -> dict[str, Any]:
     """Return status and runtime connection information for a RunPod pod."""
-    request = RunPodRequest(
+    request = build_status_request(pod_id)
+    payload = _runpod_graphql(request, api_key=api_key or api_key_from_env())
+    return _graphql_data(payload, "pod")
+
+
+def build_status_request(pod_id: str) -> RunPodRequest:
+    """Build the GraphQL request for RunPod pod status."""
+    return RunPodRequest(
         query=(
             "query pod($input: PodFilter) { pod(input: $input) { "
             "id name imageName machineId desiredStatus costPerHr ports "
@@ -106,10 +113,8 @@ def pod_status(pod_id: str, *, api_key: str | None = None) -> dict[str, Any]:
             "runtime { ports { ip isIpPublic privatePort publicPort type } } "
             "} }"
         ),
-        variables={"input": {"id": pod_id}},
+        variables={"input": {"podId": pod_id}},
     )
-    payload = _runpod_graphql(request, api_key=api_key or api_key_from_env())
-    return _graphql_data(payload, "pod")
 
 
 def terminate_pod(pod_id: str, *, api_key: str | None = None, dry_run: bool = False) -> Any:

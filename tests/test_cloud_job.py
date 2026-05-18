@@ -14,6 +14,7 @@ from anvil_audio.cloud.job import create_cloud_job_package
 from anvil_audio.cloud.runpod import (
     RunPodLaunchConfig,
     build_launch_request,
+    build_status_request,
     launch_pod,
     ssh_target_from_pod,
     terminate_pod,
@@ -200,6 +201,12 @@ def test_runpod_terminate_dry_run_uses_pod_id():
 
     assert result["dry_run"] is True
     assert result["request"]["variables"] == {"input": {"podId": "pod123"}}
+
+
+def test_runpod_status_query_uses_pod_id_filter():
+    request = build_status_request("pod123")
+
+    assert request.variables == {"input": {"podId": "pod123"}}
 
 
 def test_runpod_ssh_target_from_runtime_ports():
