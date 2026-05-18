@@ -14,10 +14,19 @@ from anvil_audio.dataset_builder import (
     build_local_dataset,
     build_youtube_dataset,
 )
+from anvil_audio.dataset_bundle import (
+    TrainingBundleConfig,
+    export_training_bundle,
+    parse_include,
+)
 from anvil_audio.dataset_qa import (
     DEFAULT_EMBEDDING_INSTRUCTION,
     DatasetQAConfig,
     run_dataset_qa,
+)
+from anvil_audio.separation import (
+    DatasetSeparationConfig,
+    separate_dataset,
 )
 
 
@@ -139,6 +148,91 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_EMBEDDING_INSTRUCTION,
         help="Optional instruction prefix used for Qwen caption embeddings.",
     )
+    qa.add_argument(
+        "--include-stems",
+        action="store_true",
+        help="Include source-separation stem health checks when metadata exists.",
+    )
+
+    separate = subparsers.add_parser(
+        "separate",
+        help="Separate clips in an existing dataset into vocals/instrumental/stems.",
+    )
+    separate.add_argument("dataset_dir", help="Directory produced by `anvil dataset`.")
+    separate.add_argument(
+        "--backend",
+        choices=("audio-separator",),
+        default="audio-separator",
+        help="Source separation backend. Default: audio-separator.",
+    )
+    separate.add_argument(
+        "--mode",
+        choices=("instrumental", "four-stem", "vocals"),
+        default="instrumental",
+        help=(
+            "Stem output mode. Default: instrumental "
+            "(vocals + instrumental)."
+        ),
+    )
+    separate.add_argument(
+        "--model",
+        default="auto",
+        help=(
+            "audio-separator model filename. Default: auto "
+            "(htdemucs_ft.yaml for four-stem, backend default otherwise)."
+        ),
+    )
+    separate.add_argument(
+        "--output-format",
+        default="wav",
+        choices=("wav", "flac"),
+        help="Stem output format. Default: wav.",
+    )
+    separate.add_argument(
+        "--model-file-dir",
+        default=None,
+        help="Optional audio-separator model cache directory.",
+    )
+    separate.add_argument(
+        "--force",
+        action="store_true",
+        help="Recompute stems even when cached separation metadata exists.",
+    )
+    separate.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only separate the first N caption records. Useful for smoke tests.",
+    )
+
+    bundle = subparsers.add_parser(
+        "export-training-bundle",
+        help="Write a portable training_bundle.json from a built dataset.",
+    )
+    bundle.add_argument("dataset_dir", help="Directory produced by `anvil dataset`.")
+    bundle.add_argument(
+        "--profile",
+        default="acestep-lora",
+        help="Training profile name written into the bundle. Default: acestep-lora.",
+    )
+    bundle.add_argument(
+        "--include",
+        default="full-mix",
+        help=(
+            "Comma-separated assets to include: full-mix, vocals, instrumental, "
+            "drums, bass, other. Default: full-mix."
+        ),
+    )
+    bundle.add_argument(
+        "--output",
+        default=None,
+        help="Output JSON path. Default: DATASET_DIR/training_bundle.json.",
+    )
+    bundle.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail if any requested asset is missing.",
+    )
     return parser
 
 
@@ -166,12 +260,52 @@ def main() -> None:
                     nearest_neighbors=args.nearest_neighbors,
                     low_confidence_threshold=args.low_confidence_threshold,
                     instruction=args.instruction,
+                    include_stems=args.include_stems,
                 )
             )
         except Exception as exc:
             print(f"dataset QA failed: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
         _print_qa_result(result.report, result.json_path, result.markdown_path)
+        return
+
+    if args.command == "separate":
+        try:
+            result = separate_dataset(
+                DatasetSeparationConfig(
+                    dataset_dir=Path(args.dataset_dir),
+                    backend=args.backend,
+                    mode=args.mode,
+                    model=args.model,
+                    output_format=args.output_format,
+                    force=args.force,
+                    limit=args.limit,
+                    model_file_dir=(
+                        Path(args.model_file_dir) if args.model_file_dir else None
+                    ),
+                )
+            )
+        except Exception as exc:
+            print(f"dataset separation failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_separation_result(result)
+        return
+
+    if args.command == "export-training-bundle":
+        try:
+            result = export_training_bundle(
+                TrainingBundleConfig(
+                    dataset_dir=Path(args.dataset_dir),
+                    profile=args.profile,
+                    include=parse_include(args.include),
+                    output=Path(args.output) if args.output else None,
+                    strict=args.strict,
+                )
+            )
+        except Exception as exc:
+            print(f"training bundle export failed: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        _print_bundle_result(result)
         return
 
     output_dir = (
@@ -235,6 +369,30 @@ def _print_qa_result(
     )
     for recommendation in report["recommendations"]:
         print(f"- {recommendation}")
+
+
+def _print_separation_result(result) -> None:
+    print(f"Dataset: {result.dataset_dir}")
+    print(f"Stems: {result.stems_dir}")
+    print(f"Separated clips: {len(result.clips)}")
+    for item in result.clips[:10]:
+        stems = ", ".join(sorted(item.stem_info))
+        cached = " cached" if item.result.cached else ""
+        print(f"- {item.clip_file}: {stems}{cached}")
+    if len(result.clips) > 10:
+        print(f"- ... {len(result.clips) - 10} more")
+
+
+def _print_bundle_result(result) -> None:
+    print(f"Training bundle: {result.bundle_path}")
+    print(f"Clips: {result.clip_count}")
+    print(f"Assets: {result.asset_count}")
+    if result.warnings:
+        print(f"Warnings: {len(result.warnings)}")
+        for warning in result.warnings[:10]:
+            print(f"- {warning}")
+        if len(result.warnings) > 10:
+            print(f"- ... {len(result.warnings) - 10} more")
 
 
 def _add_common_build_args(parser: argparse.ArgumentParser) -> None:

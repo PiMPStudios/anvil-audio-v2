@@ -115,6 +115,87 @@ Treat this report as a review aid, not an automatic delete list. Outliers are
 often exactly what you want if the adapter is supposed to cover multiple
 substyles.
 
+## Optional Source Separation
+
+For datasets that mix vocals and instruments, separate clips into stems before
+LoRA preprocessing:
+
+```bash
+anvil dataset separate ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --mode instrumental \
+    --backend audio-separator
+```
+
+This uses the optional `audio-separator` package and writes cached stems under
+`stems/` without replacing the original clips:
+
+```text
+datasets/my_style_YYYYMMDD_HHMMSS/
+  clips/
+    clip_0001.wav
+    clip_0001.json
+  stems/
+    clip_0001/
+      vocals.wav
+      instrumental.wav
+      separation.json
+```
+
+Install the separation backend in an isolated tool environment when you need it.
+`audio-separator` currently wants newer `numpy`/`protobuf` versions than some
+core Anvil audio dependencies, so do not install it directly into the Anvil venv
+unless you are deliberately testing dependency changes.
+
+```bash
+python3.13 -m venv ~/.cache/anvil-audio/tools/audio-separator
+~/.cache/anvil-audio/tools/audio-separator/bin/pip install 'audio-separator>=0.44.1'
+export ANVIL_AUDIO_SEPARATOR_BIN=~/.cache/anvil-audio/tools/audio-separator/bin/audio-separator
+```
+
+Useful modes:
+
+| Mode | Stems | Use |
+| --- | --- | --- |
+| `instrumental` | `vocals`, `instrumental` | Build production-style datasets with less voice imprinting. |
+| `four-stem` | `vocals`, `drums`, `bass`, `other` | Review arrangement and richer caption clues. |
+| `vocals` | `vocals` | Pull vocal-only material for transcription or review. |
+
+Run a tiny smoke test before processing a large dataset:
+
+```bash
+anvil dataset separate ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --mode instrumental \
+    --limit 2
+```
+
+Use `--force` to recompute stems after changing models or settings. The
+separation metadata is written into each clip sidecar, `captions.json`, and
+`dataset_manifest.json` so future QA and training-bundle work can reuse it.
+
+After separation, include stem health checks in QA:
+
+```bash
+anvil dataset qa ./datasets/my_style_YYYYMMDD_HHMMSS --include-stems
+```
+
+Stem-aware QA flags missing stem files, near-silent stems, possible clipping,
+and duration mismatches against the source clip.
+
+## Training Bundle Export
+
+After clips, captions, optional stems, and QA look reasonable, export a stable
+bundle for local training or future cloud runners:
+
+```bash
+anvil dataset export-training-bundle ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --profile acestep-lora \
+    --include full-mix,instrumental
+```
+
+This writes `training_bundle.json` with the selected assets, captions, tags,
+negative tags, timing, and warnings for missing optional assets. Use `--strict`
+when a missing requested asset should fail the export.
+
 ## ACE-Step LoRA Preprocessing
 
 ACE-Step LoRA training needs preprocessed tensor files. Convert an Anvil dataset

@@ -89,6 +89,56 @@ def test_build_dataset_qa_report_groups_caption_clusters():
     assert report["summary"]["top_tags"][0] == {"value": "dark blues", "count": 2}
     assert any("outliers" in item for item in report["recommendations"])
 
+
+def test_build_dataset_qa_report_flags_stem_health_issues(tmp_path):
+    dataset = tmp_path / "dataset"
+    stem_dir = dataset / "stems/clip_0001"
+    stem_dir.mkdir(parents=True)
+    (stem_dir / "vocals.wav").write_bytes(b"not inspected when analysis exists")
+    records = [
+        {
+            "file": "clips/clip_0001.wav",
+            "caption": "dark blues, smoky male vocal, raw guitar",
+            "tags": ["dark blues", "vocal"],
+            "negative_tags": [],
+            "confidence": 0.82,
+            "seconds_total": 10.0,
+            "separation": {
+                "mode": "instrumental",
+                "stems": {
+                    "vocals": {
+                        "file": "stems/clip_0001/vocals.wav",
+                        "analysis": {
+                            "duration_seconds": 7.0,
+                            "rms_db": -60.0,
+                            "peak_db": -0.1,
+                        },
+                    },
+                    "instrumental": "stems/clip_0001/instrumental.wav",
+                },
+            },
+        }
+    ]
+    embeddings = torch.tensor([[1.0, 0.0, 0.0]])
+
+    report = build_dataset_qa_report(
+        records,
+        embeddings,
+        DatasetQAConfig(dataset_dir=dataset, include_stems=True),
+        model_ref="fake-qwen",
+    )
+
+    assert report["summary"]["separated_clip_count"] == 1
+    assert report["summary"]["stem_issue_count"] == 4
+    issues = {item["issue"] for item in report["stem_health"]}
+    assert issues == {
+        "duration_mismatch",
+        "missing_file",
+        "near_silence",
+        "possible_clipping",
+    }
+
+
 def _caption_records():
     return [
         {

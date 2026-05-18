@@ -37,6 +37,7 @@ class DatasetQAConfig:
     low_confidence_threshold: float = 0.45
     max_report_items: int = 20
     instruction: str = DEFAULT_EMBEDDING_INSTRUCTION
+    include_stems: bool = False
 
 
 @dataclass(slots=True)
@@ -203,6 +204,7 @@ def build_dataset_qa_report(
     clusters = _clusters(records, similarity, config)
     outliers = _outliers(records, similarity, config)
     low_confidence = _low_confidence_records(records, config)
+    stem_health = _stem_health_records(records, config) if config.include_stems else []
     top_tags = _top_field_values(records, "tags", limit=12)
     top_negative_tags = _top_field_values(records, "negative_tags", limit=8)
     recommendations = _recommendations(
@@ -211,6 +213,7 @@ def build_dataset_qa_report(
         duplicate_pairs,
         outliers,
         low_confidence,
+        stem_health,
         top_tags,
     )
 
@@ -231,6 +234,8 @@ def build_dataset_qa_report(
             "duplicate_pair_count": len(duplicate_pairs),
             "outlier_count": len(outliers),
             "low_confidence_count": len(low_confidence),
+            "stem_issue_count": len(stem_health),
+            "separated_clip_count": _separated_clip_count(records),
             "average_caption_confidence": _average_confidence(records),
             "top_tags": top_tags,
             "top_negative_tags": top_negative_tags,
@@ -239,6 +244,7 @@ def build_dataset_qa_report(
         "duplicate_pairs": duplicate_pairs[: config.max_report_items],
         "outliers": outliers[: config.max_report_items],
         "low_confidence_clips": low_confidence[: config.max_report_items],
+        "stem_health": stem_health[: config.max_report_items],
         "recommendations": recommendations,
     }
 
@@ -457,6 +463,7 @@ def _recommendations(
     duplicates: list[dict[str, Any]],
     outliers: list[dict[str, Any]],
     low_confidence: list[dict[str, Any]],
+    stem_health: list[dict[str, Any]],
     top_tags: list[dict[str, Any]],
 ) -> list[str]:
     recommendations: list[str] = []
@@ -475,6 +482,10 @@ def _recommendations(
     if low_confidence:
         recommendations.append(
             f"Improve or remove {len(low_confidence)} low-confidence captions."
+        )
+    if stem_health:
+        recommendations.append(
+            f"Review {len(stem_health)} stem health issues before training."
         )
     if clusters and len(records) >= 8:
         largest_ratio = clusters[0]["size"] / len(records)
@@ -503,6 +514,8 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         f"- Duplicate pairs: {summary['duplicate_pair_count']}",
         f"- Outliers: {summary['outlier_count']}",
         f"- Low-confidence captions: {summary['low_confidence_count']}",
+        f"- Separated clips: {summary.get('separated_clip_count', 0)}",
+        f"- Stem issues: {summary.get('stem_issue_count', 0)}",
         "",
         "## Recommendations",
         "",
@@ -534,7 +547,132 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
             )
     else:
         lines.append("- None below threshold.")
+    lines.extend(["", "## Stem Health", ""])
+    if report.get("stem_health"):
+        for issue in report["stem_health"]:
+            lines.append(
+                f"- `{issue['file']}` {issue['stem']}: {issue['issue']} "
+                f"({issue['detail']})"
+            )
+    else:
+        lines.append("- No stem issues reported.")
     return "\n".join(lines) + "\n"
+
+
+def _separated_clip_count(records: list[dict[str, Any]]) -> int:
+    return sum(1 for record in records if isinstance(record.get("separation"), dict))
+
+
+def _stem_health_records(
+    records: list[dict[str, Any]],
+    config: DatasetQAConfig,
+) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    dataset_dir = config.dataset_dir.expanduser().resolve()
+    for record in records:
+        separation = record.get("separation")
+        if not isinstance(separation, dict):
+            continue
+        stems = separation.get("stems")
+        if not isinstance(stems, dict):
+            issues.append(
+                _stem_issue(record, "", "missing_stems", "separation has no stems")
+            )
+            continue
+        source_duration = _source_duration(record)
+        for stem, stem_payload in sorted(stems.items()):
+            stem_file = _stem_file(stem_payload)
+            if not stem_file:
+                issues.append(
+                    _stem_issue(record, str(stem), "missing_file", "no stem file path")
+                )
+                continue
+            path = dataset_dir / stem_file
+            if not path.is_file():
+                issues.append(
+                    _stem_issue(
+                        record,
+                        str(stem),
+                        "missing_file",
+                        f"file does not exist: {stem_file}",
+                    )
+                )
+                continue
+            analysis = _stem_analysis(stem_payload)
+            if not analysis:
+                continue
+            rms_db = _as_float(analysis.get("rms_db"))
+            peak_db = _as_float(analysis.get("peak_db"))
+            duration = _as_float(analysis.get("duration_seconds"))
+            if rms_db is not None and rms_db <= -55.0:
+                issues.append(
+                    _stem_issue(record, str(stem), "near_silence", f"rms {rms_db} dB")
+                )
+            if peak_db is not None and peak_db >= -0.2:
+                issues.append(
+                    _stem_issue(record, str(stem), "possible_clipping", f"peak {peak_db} dB")
+                )
+            if (
+                source_duration is not None
+                and duration is not None
+                and abs(source_duration - duration) > 0.25
+            ):
+                issues.append(
+                    _stem_issue(
+                        record,
+                        str(stem),
+                        "duration_mismatch",
+                        f"source {source_duration}s, stem {duration}s",
+                    )
+                )
+    return issues
+
+
+def _stem_issue(
+    record: dict[str, Any],
+    stem: str,
+    issue: str,
+    detail: str,
+) -> dict[str, Any]:
+    return {
+        "file": _record_file(record),
+        "stem": stem or "(all)",
+        "issue": issue,
+        "detail": detail,
+    }
+
+
+def _stem_file(stem_payload: Any) -> str:
+    if isinstance(stem_payload, str):
+        return stem_payload
+    if isinstance(stem_payload, dict):
+        return str(stem_payload.get("file") or "")
+    return ""
+
+
+def _stem_analysis(stem_payload: Any) -> dict[str, Any]:
+    if isinstance(stem_payload, dict):
+        analysis = stem_payload.get("analysis")
+        if isinstance(analysis, dict):
+            return analysis
+    return {}
+
+
+def _source_duration(record: dict[str, Any]) -> float | None:
+    duration = _as_float(record.get("seconds_total"))
+    if duration is not None:
+        return duration
+    analysis = record.get("analysis")
+    if isinstance(analysis, dict):
+        return _as_float(analysis.get("duration_seconds"))
+    return None
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _top_field_values(

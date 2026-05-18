@@ -185,3 +185,25 @@ The branch is ready for broader testing when:
 
 Once this layer is reliable, the next branch can build the cloud training runner
 around the stable training bundle instead of around raw source files.
+
+## Current Branch Status
+
+The first implementation slice adds:
+
+- `anvil dataset separate`
+- `anvil_audio.separation` backend abstraction
+- `audio-separator` CLI backend support via `ANVIL_AUDIO_SEPARATOR_BIN`
+- `instrumental`, `four-stem`, and `vocals` modes
+- cached `stems/<clip>/separation.json`
+- clip sidecar, `captions.json`, and `dataset_manifest.json` updates
+- `anvil dataset qa --include-stems` for missing stem, near-silence, clipping,
+  and duration-mismatch checks
+- `anvil dataset export-training-bundle` for stable local/cloud handoff
+
+`audio-separator` should run from an isolated tool environment for now. Its
+current dependency set upgrades `numpy` and `protobuf` beyond versions required
+by some existing Anvil audio packages, so adding it as a normal in-venv extra is
+not safe yet.
+
+Next slices should test the separator against real music clips and then feed
+`training_bundle.json` into ACE-Step preprocessing/training paths.
