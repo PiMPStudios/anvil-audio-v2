@@ -262,7 +262,7 @@ anvil cloud search --gpu h200 --max-price 4 --min-vram-gb 80
 
 export RUNPOD_API_KEY=...
 anvil cloud runpod launch ./cloud-jobs/my_style_h200 \
-    --gpu-type "H200" \
+    --gpu-type "NVIDIA H200" \
     --dry-run
 
 anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
@@ -276,7 +276,8 @@ sync `outputs/` plus `logs/` back after training.
 `anvil cloud search` uses GPUFindr's public read-only catalog. It is only a
 provider discovery step. The RunPod adapter can create pods through RunPod's
 GraphQL API once `RUNPOD_API_KEY` is set. Keep `--dry-run` on until the launch
-request looks right, and terminate pods promptly when training finishes.
+request looks right, use `gpuId` values from `runpodctl gpu list`, and
+terminate pods promptly when training finishes.
 
 ## ACE-Step LoRA Preprocessing
 

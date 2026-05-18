@@ -216,7 +216,10 @@ def build_parser() -> argparse.ArgumentParser:
     runpod_launch.add_argument(
         "--gpu-type",
         required=True,
-        help='RunPod GPU type id/name, e.g. "H200" or "NVIDIA H200".',
+        help=(
+            "RunPod gpuId from `runpodctl gpu list`, "
+            'e.g. "NVIDIA H200" or "NVIDIA A100-SXM4-80GB".'
+        ),
     )
     runpod_launch.add_argument("--name", default=None, help="Optional pod name.")
     runpod_launch.add_argument("--gpu-count", type=int, default=1)

@@ -633,7 +633,7 @@ anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle.json \
 
 export RUNPOD_API_KEY=...
 anvil cloud runpod launch ./cloud-jobs/my_style_h200 \
-    --gpu-type "H200" \
+    --gpu-type "NVIDIA H200" \
     --dry-run
 
 anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
@@ -652,8 +652,9 @@ provider availability and pricing before you create an account somewhere.
 until the request looks right, then remove it to create a pod. The default
 RunPod launch uses template `runpod-torch-v280`, matching RunPod's Torch 2.8
 deploy URL. Add `--minimal` if RunPod reports supply constraints even though
-the UI shows featured GPUs. Use `anvil cloud runpod terminate POD_ID` when the
-run is done.
+the UI shows featured GPUs. For `--gpu-type`, use the `gpuId` value from
+`runpodctl gpu list`; for example, H200 SXM is `NVIDIA H200`. Use
+`anvil cloud runpod terminate POD_ID` when the run is done.
 
 ---
 

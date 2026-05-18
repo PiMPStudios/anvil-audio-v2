@@ -81,7 +81,7 @@ anvil cloud package \
 
 export RUNPOD_API_KEY=...
 anvil cloud runpod launch ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
-    --gpu-type "H200" \
+    --gpu-type "NVIDIA H200" \
     --dry-run
 
 anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
@@ -98,10 +98,13 @@ it is run with `--dry-run`. The default RunPod launch uses template
 `runpod-torch-v280`, matching the deploy URLs returned by GPUFindr for RunPod
 H200/H100/A100 offers. Add `--minimal` when RunPod's allocator rejects the
 extra disk or minimum machine constraints even though the UI still shows
-featured GPUs. Remove `--dry-run` when the remote commands look right. The
-runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`, then runs
-`scripts/run_training.sh`. Passing `--collect` also runs `scripts/collect.sh`
-and syncs `outputs/` plus `logs/` back into `remote_artifacts/`.
+featured GPUs. For `--gpu-type`, use the `gpuId` value from
+`runpodctl gpu list`; for example, H200 SXM is `NVIDIA H200`, and A100 SXM is
+`NVIDIA A100-SXM4-80GB`. Remove `--dry-run` when the remote commands look
+right. The runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`,
+then runs `scripts/run_training.sh`. Passing `--collect` also runs
+`scripts/collect.sh` and syncs `outputs/` plus `logs/` back into
+`remote_artifacts/`.
 
 Useful RunPod follow-ups:
 
