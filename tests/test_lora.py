@@ -86,8 +86,11 @@ def test_write_acestep_dataset_json_from_anvil_dataset(tmp_path):
 
     assert payload["metadata"]["custom_tag"] == "my_style"
     assert payload["samples"][0]["caption"] == "gritty rock, live drums"
-    assert payload["samples"][0]["audio_path"].endswith("clip_0001.wav")
     assert payload["samples"][0]["filename"] == "00001_clip_0001.wav"
+    assert payload["samples"][0]["audio_path"].endswith(
+        ".acestep_audio/00001_clip_0001.wav"
+    )
+    assert Path(payload["samples"][0]["audio_path"]).is_file()
     assert payload["samples"][0]["lyrics"] == "[Instrumental]"
 
 
@@ -118,8 +121,14 @@ def test_write_acestep_dataset_json_uses_unique_sample_names(tmp_path):
         "00001_instrumental.wav",
         "00002_instrumental.wav",
     ]
-    assert samples[0]["audio_path"].endswith("clip_0001/instrumental.wav")
-    assert samples[1]["audio_path"].endswith("clip_0002/instrumental.wav")
+    assert samples[0]["audio_path"].endswith(
+        ".acestep_audio/00001_instrumental.wav"
+    )
+    assert samples[1]["audio_path"].endswith(
+        ".acestep_audio/00002_instrumental.wav"
+    )
+    assert Path(samples[0]["audio_path"]).is_file()
+    assert Path(samples[1]["audio_path"]).is_file()
 
 
 def test_build_train_command_targets_fixed_trainer(tmp_path):

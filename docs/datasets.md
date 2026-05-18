@@ -306,7 +306,9 @@ Anvil validates the tensor files after preprocessing and fails fast if any
 non-finite conditioning values are written. The generated ACE-Step sample
 filenames are index-prefixed so stem-heavy datasets with many files named
 `instrumental.wav` or `vocals.wav` do not collide inside ACE-Step's temporary
-preprocessing outputs.
+preprocessing outputs. To make that work with ACE-Step's path-derived temp
+names, Anvil also stages lightweight links under `.acestep_audio/` and points
+the generated dataset JSON at those unique filenames.
 
 Then run training from those tensors:
 

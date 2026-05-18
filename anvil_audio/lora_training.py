@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -105,10 +106,16 @@ def write_acestep_dataset_json(
             or 0.0
         )
         sample_genre = genre or ", ".join(record.get("tags", [])[:5])
+        sample_filename = _sample_filename(index, rel_file)
+        staged_audio_path = _stage_sample_audio(
+            dataset_dir,
+            source_audio=audio_path,
+            sample_filename=sample_filename,
+        )
         samples.append(
             {
-                "filename": _sample_filename(index, rel_file),
-                "audio_path": str(audio_path),
+                "filename": sample_filename,
+                "audio_path": str(staged_audio_path),
                 "caption": caption,
                 "lyrics": lyrics,
                 "genre": sample_genre,
@@ -372,6 +379,33 @@ def _sample_filename(index: int, rel_file: str) -> str:
     stem = stem or "audio"
     suffix = path.suffix or ".wav"
     return f"{index:05d}_{stem}{suffix}"
+
+
+def _stage_sample_audio(
+    dataset_dir: Path,
+    *,
+    source_audio: Path,
+    sample_filename: str,
+) -> Path:
+    staged_dir = dataset_dir / ".acestep_audio"
+    staged_dir.mkdir(parents=True, exist_ok=True)
+    staged_audio = staged_dir / sample_filename
+    if staged_audio.exists():
+        try:
+            if staged_audio.samefile(source_audio):
+                return staged_audio.resolve()
+        except OSError:
+            pass
+        staged_audio.unlink()
+
+    try:
+        os.link(source_audio, staged_audio)
+    except OSError:
+        try:
+            staged_audio.symlink_to(source_audio)
+        except OSError:
+            shutil.copy2(source_audio, staged_audio)
+    return staged_audio.resolve()
 
 
 def _read_json(path: Path) -> Any:
