@@ -659,7 +659,9 @@ the UI shows featured GPUs. For `--gpu-type`, use the `gpuId` value from
 Cloud bootstrap reuses the provider image's CUDA/PyTorch stack via a
 system-site-packages venv, then installs Anvil and ACE-Step without letting
 ACE-Step replace the image's torch build. This avoids torch resolver conflicts
-on managed GPU images.
+on managed GPU images. Remote uploads preserve `.venv`, `work`, `outputs`, and
+`logs` so rerunning with `--skip-bootstrap` does not delete the remote runtime
+state.
 
 ---
 

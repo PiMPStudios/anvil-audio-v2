@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+REMOTE_RUNTIME_EXCLUDES = (".venv/", "work/", "outputs/", "logs/")
+
 
 @dataclass(slots=True)
 class SSHRunConfig:
@@ -103,15 +105,22 @@ def _ssh_command(config: SSHRunConfig, remote_command: str) -> list[str]:
 def _rsync_upload_command(
     config: SSHRunConfig, job_dir: Path, remote_job_dir: str
 ) -> list[str]:
-    return [
+    command = [
         "rsync",
         "-az",
         "--delete",
+    ]
+    for excluded in REMOTE_RUNTIME_EXCLUDES:
+        command.extend(["--exclude", excluded])
+    command.extend(
+        [
         "-e",
         _rsync_ssh_transport(config),
         f"{job_dir}/",
         f"{config.host}:{remote_job_dir}/",
-    ]
+        ]
+    )
+    return command
 
 
 def _rsync_collect_commands(

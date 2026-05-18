@@ -92,6 +92,9 @@ def test_plan_ssh_run_builds_dry_run_commands(tmp_path):
 
     assert commands[0][:4] == ["ssh", "-p", "2222", "ubuntu@203.0.113.10"]
     assert commands[1][0] == "rsync"
+    assert commands[1].count("--exclude") == 4
+    assert ".venv/" in commands[1]
+    assert "outputs/" in commands[1]
     assert "scripts/bootstrap.sh" in commands[2][-1]
     assert "scripts/run_training.sh" in commands[3][-1]
     assert "scripts/collect.sh" in commands[4][-1]
