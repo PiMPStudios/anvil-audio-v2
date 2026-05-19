@@ -64,8 +64,10 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 # Loaded pipeline cache — avoids reloading the same model between calls.
-# Key: registry model name.  Value: BasePipeline instance.
-_pipeline_cache: dict[str, Any] = {}
+# Key: (registry model name, ACE-Step MLX DiT override).  Value: BasePipeline
+# instance.  The override matters because ACE-Step LoRA requires the PyTorch
+# DiT path, while normal Apple Silicon generation may prefer native MLX DiT.
+_pipeline_cache: dict[tuple[str, bool | None], Any] = {}
 
 # Default project applied when project="" is passed to any tool.
 _active_project: str = ""
@@ -172,19 +174,30 @@ def _auto_select_model(prompt: str) -> str:
     return models[0].name  # fallback: whatever is first
 
 
-def _get_pipeline(model_name: str) -> Any:
+def _get_pipeline(model_name: str, *, use_mlx_dit: bool | None = None) -> Any:
     """Return a cached pipeline, loading it if necessary."""
-    if model_name not in _pipeline_cache:
-        _log(f"Loading model: {model_name}")
+    entry = registry.get_model(model_name)
+    cache_key = (
+        model_name,
+        use_mlx_dit if entry is not None and entry.pipeline_type == "acestep" else None,
+    )
+    if cache_key not in _pipeline_cache:
+        suffix = ""
+        if entry is not None and entry.pipeline_type == "acestep" and use_mlx_dit is not None:
+            suffix = f" (use_mlx_dit={use_mlx_dit})"
+        _log(f"Loading model: {model_name}{suffix}")
         from anvil_audio.core.registry import load_pipeline
 
         # load_pipeline triggers model weight downloads and prints progress
         # messages (HF hub, tqdm, "Loading VAE...", etc.) to stdout.
         # Redirect to stderr — stdout is reserved for JSON-RPC.
         with stdout_to_stderr():
-            _pipeline_cache[model_name] = load_pipeline(model_name)
-        _log(f"Model ready: {model_name}")
-    return _pipeline_cache[model_name]
+            _pipeline_cache[cache_key] = load_pipeline(
+                model_name,
+                use_mlx_dit=use_mlx_dit,
+            )
+        _log(f"Model ready: {model_name}{suffix}")
+    return _pipeline_cache[cache_key]
 
 
 def _clamp_duration(model_name: str, duration: float) -> float:
@@ -236,13 +249,20 @@ def _run_generate(
     lora: str = "",
     lora_scale: float = 1.0,
     lora_adapter_name: str = "",
+    use_mlx_dit: bool | None = None,
 ) -> dict[str, Any]:
     """Core generation logic shared by generate_audio and batch_generate."""
     import numpy as np
 
-    pipeline = _get_pipeline(model_name)
     entry = registry.get_model(model_name)
     params = entry.resolved_params() if entry else {}
+    is_acestep = entry is not None and entry.pipeline_type == "acestep"
+    lora_ref = lora.strip()
+    effective_use_mlx_dit = use_mlx_dit
+    if is_acestep and lora_ref and effective_use_mlx_dit is None:
+        effective_use_mlx_dit = False
+
+    pipeline = _get_pipeline(model_name, use_mlx_dit=effective_use_mlx_dit)
 
     effective_steps = steps if steps is not None else params.get("steps", 100)
     effective_cfg = cfg_scale if cfg_scale is not None else params.get("cfg_scale", 7.0)
@@ -252,7 +272,6 @@ def _run_generate(
         else int(np.random.randint(0, 2**32 - 1, dtype=np.uint32))
     )
 
-    is_acestep = entry is not None and entry.pipeline_type == "acestep"
     if is_acestep:
         conditioning = [
             {
@@ -268,12 +287,14 @@ def _run_generate(
         ]
 
     extra: dict[str, Any] = {}
-    if lora and lora.strip():
+    if is_acestep and effective_use_mlx_dit is not None:
+        extra["use_mlx_dit"] = effective_use_mlx_dit
+    if lora_ref:
         if not is_acestep:
             raise ValueError("LoRA adapters are only supported with ACE-Step models.")
         from anvil_audio.lora import resolve_adapter_reference
 
-        lora_path, lora_entry = resolve_adapter_reference(lora)
+        lora_path, lora_entry = resolve_adapter_reference(lora_ref)
         apply_lora = getattr(pipeline, "apply_lora_adapter", None)
         if not callable(apply_lora):
             raise RuntimeError("Selected ACE-Step pipeline does not support LoRA loading.")
@@ -283,7 +304,7 @@ def _run_generate(
             scale=float(lora_scale),
         )
         extra["lora"] = {
-            "reference": lora,
+            "reference": lora_ref,
             "path": str(lora_path),
             "scale": float(lora_scale),
             "adapter_name": lora_adapter_name.strip() or None,
@@ -415,6 +436,7 @@ def generate_audio(
     lora: str = "",
     lora_scale: float = 1.0,
     lora_adapter_name: str = "",
+    use_mlx_dit: bool | None = None,
 ) -> dict[str, Any]:
     """Generate audio from a text prompt using a registered model.
 
@@ -448,6 +470,11 @@ def generate_audio(
         lora_scale: Adapter strength. 1.0 = full strength; lower values blend
                     with the base model.
         lora_adapter_name: Optional runtime adapter name for ACE-Step.
+        use_mlx_dit: ACE-Step backend override. False disables native MLX
+                     DiT/VAE for this call, which is required for current
+                     PEFT/LoKr LoRA adapters. True forces MLX DiT. Null/omitted
+                     uses registry/env defaults, except LoRA calls default to
+                     False automatically.
 
     Returns:
         dict with keys: path (str), sidecar_path (str), metadata (dict)
@@ -469,6 +496,7 @@ def generate_audio(
             lora=lora,
             lora_scale=lora_scale,
             lora_adapter_name=lora_adapter_name,
+            use_mlx_dit=use_mlx_dit,
         )
     except Exception as exc:
         return {"error": str(exc)}
@@ -483,9 +511,9 @@ def batch_generate(
 
     Each item in the list is a condition dict with the same keys as
     generate_audio: prompt (required), model, duration_seconds, steps,
-    cfg_scale, seed, fmt, lyrics, negative_prompt, lora, lora_scale, and
-    lora_adapter_name. Items using the same model share the cached pipeline —
-    no reload penalty.
+    cfg_scale, seed, fmt, lyrics, negative_prompt, lora, lora_scale,
+    lora_adapter_name, and use_mlx_dit. Items using the same model/backend
+    share the cached pipeline — no reload penalty.
 
     Args:
         items: List of condition dicts. Each must have at least "prompt".
@@ -523,6 +551,7 @@ def batch_generate(
                 lora=str(item.get("lora", "")),
                 lora_scale=float(item.get("lora_scale", 1.0)),
                 lora_adapter_name=str(item.get("lora_adapter_name", "")),
+                use_mlx_dit=item.get("use_mlx_dit"),
             )
             results.append(result)
         except Exception as exc:
@@ -748,7 +777,7 @@ def list_models() -> list[dict[str, Any]]:
     default_params, is_loaded (whether it's currently in the model cache),
     and supported_features (e.g. "lyrics" for ACE-Step models).
     """
-    loaded = set(_pipeline_cache.keys())
+    loaded = {key[0] for key in _pipeline_cache}
     result = []
     for entry in registry.list_models():
         features: list[str] = []
@@ -774,6 +803,17 @@ def list_models() -> list[dict[str, Any]]:
                 "max_duration": entry.max_duration,
                 "default_params": entry.resolved_params(),
                 "is_loaded": entry.name in loaded,
+                "loaded_backends": [
+                    (
+                        "default"
+                        if key[1] is None
+                        else "mlx_dit"
+                        if key[1]
+                        else "torch_dit"
+                    )
+                    for key in _pipeline_cache
+                    if key[0] == entry.name
+                ],
                 "supported_features": features,
                 "pretrained_name": entry.pretrained_name,
             }
@@ -833,7 +873,12 @@ def get_model_info(model: str) -> dict[str, Any]:
         "max_duration": entry.max_duration,
         "default_params": entry.resolved_params(),
         "supported_features": features,
-        "is_loaded": entry.name in _pipeline_cache,
+        "is_loaded": any(key[0] == entry.name for key in _pipeline_cache),
+        "loaded_backends": [
+            "default" if key[1] is None else "mlx_dit" if key[1] else "torch_dit"
+            for key in _pipeline_cache
+            if key[0] == entry.name
+        ],
         "source": source,
     }
 

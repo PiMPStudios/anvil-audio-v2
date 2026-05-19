@@ -1,4 +1,5 @@
 import json
+import importlib
 from pathlib import Path
 
 import torch
@@ -59,7 +60,13 @@ def test_mcp_generate_applies_lora_and_records_metadata(monkeypatch, tmp_path):
 
     fake_pipeline = FakePipeline()
     monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
-    monkeypatch.setattr(mcp_server, "_get_pipeline", lambda _name: fake_pipeline)
+    seen_pipeline_kwargs = {}
+
+    def fake_get_pipeline(_name, **kwargs):
+        seen_pipeline_kwargs.update(kwargs)
+        return fake_pipeline
+
+    monkeypatch.setattr(mcp_server, "_get_pipeline", fake_get_pipeline)
 
     result = mcp_server._run_generate(
         prompt="dark blues",
@@ -78,11 +85,60 @@ def test_mcp_generate_applies_lora_and_records_metadata(monkeypatch, tmp_path):
     )
 
     assert "error" not in result
+    assert seen_pipeline_kwargs["use_mlx_dit"] is False
     assert fake_pipeline.lora_calls[0][1:] == ("style", 0.75)
     metadata = result["metadata"]
     assert metadata["extra"]["lora"]["registry_id"] == "dark-blues"
     assert metadata["extra"]["lora"]["scale"] == 0.75
     assert metadata["extra"]["lyrics"] == "[Instrumental]"
+    assert metadata["extra"]["use_mlx_dit"] is False
+
+
+def test_mcp_generate_accepts_per_call_mlx_dit_override(monkeypatch):
+    captured = {}
+
+    def fake_run_generate(**kwargs):
+        captured.update(kwargs)
+        return {"path": "/tmp/test.wav"}
+
+    monkeypatch.setattr(mcp_server, "_run_generate", fake_run_generate)
+    monkeypatch.setattr(mcp_server, "_clamp_duration", lambda _model, duration: duration)
+
+    result = mcp_server.generate_audio(
+        prompt="dark blues",
+        model="acestep-v1.5-sft",
+        use_mlx_dit=False,
+    )
+
+    assert result == {"path": "/tmp/test.wav"}
+    assert captured["use_mlx_dit"] is False
+
+
+def test_mcp_pipeline_cache_separates_mlx_dit_backends(monkeypatch):
+    calls = []
+
+    class FakeEntry:
+        pipeline_type = "acestep"
+
+    def fake_load_pipeline(name, **kwargs):
+        calls.append((name, kwargs.get("use_mlx_dit")))
+        return object()
+
+    registry_module = importlib.import_module("anvil_audio.core.registry")
+    monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
+    monkeypatch.setattr(registry_module, "load_pipeline", fake_load_pipeline)
+    monkeypatch.setattr(mcp_server, "_pipeline_cache", {})
+
+    first = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=False)
+    second = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=True)
+    third = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=False)
+
+    assert first is third
+    assert first is not second
+    assert calls == [
+        ("acestep-v1.5-sft", False),
+        ("acestep-v1.5-sft", True),
+    ]
 
 
 def test_mcp_server_no_mlx_dit_flag_sets_env(monkeypatch):

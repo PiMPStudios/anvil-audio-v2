@@ -866,8 +866,9 @@ the wall-clock time from the start of inference to the file being written. This 
 compare backends directly (e.g. PyTorch MPS vs MLX) without any external timing.
 
 ACE-Step generation tools also accept `lora`, `lora_scale`, and
-`lora_adapter_name`. Use `list_lora_adapters` to discover registered adapter
-IDs, then pass the adapter id or a direct PEFT/LoKr path:
+`lora_adapter_name`. They also accept per-call `use_mlx_dit`. Use
+`list_lora_adapters` to discover registered adapter IDs, then pass the adapter
+id or a direct PEFT/LoKr path:
 
 ```text
 generate_audio(
@@ -875,12 +876,20 @@ generate_audio(
   model="acestep-v1.5-sft",
   lora="dark-blues-h200-sft",
   lora_scale=0.75,
+  use_mlx_dit=false,
   negative_prompt="muddy mix, harsh treble, weak drums"
 )
 ```
 
+For LoRA calls, MCP automatically defaults `use_mlx_dit` to `false` when you do
+not specify it, because current PEFT/LoKr adapters apply to ACE-Step's PyTorch
+DiT. Explicitly pass `use_mlx_dit=true` only for non-LoRA ACE-Step calls where
+you want the native MLX DiT/VAE backend.
+
 Models are loaded lazily on first use and cached between calls — switching between
-two models during a session only pays the load cost once per model.
+two models during a session only pays the load cost once per model. ACE-Step
+keeps separate cached instances for the default, MLX DiT, and PyTorch DiT
+backend variants when those variants are requested.
 
 ### Claude Desktop config
 

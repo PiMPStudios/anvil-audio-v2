@@ -451,6 +451,7 @@ registry = ModelRegistry()
 def load_pipeline(
     name: str,
     device: str | None = None,
+    use_mlx_dit: bool | None = None,
 ) -> "BasePipeline":
     """Load a pipeline by registry name.
 
@@ -463,6 +464,8 @@ def load_pipeline(
                 ``"acestep-v1.5-turbo"``).
         device: Target device string (``"cuda"``, ``"mps"``, ``"cpu"``).
                 Auto-detects via ``get_best_device()`` if omitted.
+        use_mlx_dit: ACE-Step-only override for native MLX DiT/VAE use.
+                ``None`` keeps registry/env defaults.
 
     Returns:
         A ready-to-use ``BasePipeline`` instance.
@@ -504,6 +507,7 @@ def load_pipeline(
             device=acestep_device,
             lm_model_path=lm_path,
             default_params=entry.resolved_params(),
+            use_mlx_dit=use_mlx_dit,
         )
 
     # ---------------------------------------------------------------
