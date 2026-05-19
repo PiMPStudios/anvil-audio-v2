@@ -199,12 +199,14 @@ ACE-Step is **optional**. If you don't install it, all other Anvil functionality
 ### LM thinking
 
 ACE-Step ships a separate 5 Hz LM that produces structured `audio_codes` fed
-into the DiT. Anvil can initialise that LM automatically, but the built-in SFT
-entry defaults to the direct DiT conditioning path because that is the
-known-good local baseline for blank-lyrics SFT generation.
+into the DiT. Anvil can initialise that LM automatically when a generation uses
+thinking/COT/DCW options, but the built-in SFT entry defaults to the direct DiT
+conditioning path because that is the known-good local baseline for blank-lyrics
+SFT generation and avoids keeping the extra LM resident in memory.
 
-Anvil initialises the LM automatically using the checkpoint specified in the registry
-entry. The built-in entries default to:
+When the LM path is configured, Anvil lazy-loads the LM from the checkpoint
+specified in the registry entry the first time the LM path is actually needed.
+The built-in entries default to:
 
 | Model | LM checkpoint |
 |-------|---------------|
@@ -888,10 +890,14 @@ not specify it, because current PEFT/LoKr adapters apply to ACE-Step's PyTorch
 DiT. Explicitly pass `use_mlx_dit=true` only for non-LoRA ACE-Step calls where
 you want the native MLX DiT/VAE backend.
 
-Models are loaded lazily on first use and cached between calls — switching between
-two models during a session only pays the load cost once per model. ACE-Step
-keeps separate cached instances for the default, MLX DiT, and PyTorch DiT
-backend variants when those variants are requested.
+Models are loaded lazily on first use and cached between calls. The MCP server
+keeps a small LRU cache of loaded pipelines so desktop memory does not climb
+forever as you switch models. The default keeps two resident pipelines; set
+`ANVIL_MCP_MAX_PIPELINES=0` to disable automatic eviction, or set a different
+count if your machine has more headroom. You can also set
+`ANVIL_MCP_IDLE_TIMEOUT_SECONDS` to evict models that have not been used for a
+while. ACE-Step keeps separate cached instances for the default, MLX DiT, and
+PyTorch DiT backend variants when those variants are requested.
 
 If an ACE-Step pipeline has a LoRA loaded, a later MCP generation with no
 `lora` argument explicitly disables the active adapter before generating. This

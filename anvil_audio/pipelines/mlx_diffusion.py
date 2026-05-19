@@ -64,6 +64,7 @@ Usage
 
 from __future__ import annotations
 
+import gc
 import platform
 import sys
 from pathlib import Path
@@ -462,6 +463,23 @@ class MLXDiffusionPipeline(BasePipeline):
         without modification.
         """
         return self
+
+    def unload(self) -> None:
+        """Drop MLX model references before cache eviction."""
+        self._pipe = None
+        gc.collect()
+        try:
+            import mlx.core as mx
+
+            clear_cache = getattr(mx, "clear_cache", None)
+            if callable(clear_cache):
+                clear_cache()
+            metal = getattr(mx, "metal", None)
+            metal_clear_cache = getattr(metal, "clear_cache", None)
+            if callable(metal_clear_cache):
+                metal_clear_cache()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Convenience helpers

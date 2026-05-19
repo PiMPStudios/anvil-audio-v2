@@ -21,12 +21,13 @@ Anvil conditioning key  →  ACE-Step parameter
 
 LM thinking path
 ----------------
-When ``lm_model_path`` is provided (and the ``LLMHandler`` import succeeds),
-the adapter initialises ACE-Step's 5 Hz LM alongside the DiT.  Generation is
-then delegated to ACE-Step's upstream ``generate_music`` orchestration, so
+When ``lm_model_path`` is provided, ACE-Step's 5 Hz LM is loaded lazily the
+first time a generation actually enables thinking/COT/DCW options.  Generation
+is then delegated to ACE-Step's upstream ``generate_music`` orchestration, so
 ``thinking=True`` can generate semantic audio-code hints and metadata.  The
 built-in SFT entry keeps thinking disabled by default to match AnvilApp's
-known-good direct DiT conditioning path.
+known-good direct DiT conditioning path and avoids paying the LM memory cost
+for direct DiT generations.
 
 If the LM is unavailable (``lm_model_path=None``, import error, or
 initialisation failure) the adapter falls back gracefully to DiT-only
@@ -253,7 +254,7 @@ class ACEStepPipeline(BasePipeline):
             f"offload={offload_to_cpu}"
             + (f"  dit_offload={offload_dit_to_cpu}" if offload_dit_to_cpu else "")
             + (f"  quantization={quantization}" if quantization else "")
-            + ("  mlx=DiT+VAE+LM" if on_apple_silicon and self._use_mlx_dit else ""),
+            + ("  mlx=DiT+VAE" if on_apple_silicon and self._use_mlx_dit else ""),
             file=sys.stderr,
         )
         # initialize_service loads model weights and may print to stdout;
@@ -289,11 +290,47 @@ class ACEStepPipeline(BasePipeline):
         self._lm_handler: Any = None
         self._lm_available: bool = False
         self._lm_model_name: str = ""
-
-        if lm_model_path is not None:
-            self._init_lm_planner(lm_model_path, device, offload_to_cpu)
+        self._lm_model_path: str | None = lm_model_path
+        self._lm_device: str = device
+        self._lm_offload_to_cpu: bool = offload_to_cpu
+        self._lm_init_attempted: bool = False
 
         self._loaded_lora_adapters: dict[str, str] = {}
+
+    @staticmethod
+    def _lm_requested(
+        *,
+        thinking: bool,
+        use_cot_metas: bool,
+        use_cot_caption: bool,
+        use_cot_language: bool,
+        dcw_enabled: bool,
+    ) -> bool:
+        """Return true when ACE-Step generation needs the optional 5 Hz LM."""
+        return any(
+            (
+                thinking,
+                use_cot_metas,
+                use_cot_caption,
+                use_cot_language,
+                dcw_enabled,
+            )
+        )
+
+    def _ensure_lm_planner(self) -> bool:
+        """Initialise the optional 5 Hz LM once, only when generation needs it."""
+        if self._lm_available:
+            return True
+        if self._lm_model_path is None or self._lm_init_attempted:
+            return False
+
+        self._lm_init_attempted = True
+        self._init_lm_planner(
+            self._lm_model_path,
+            self._lm_device,
+            self._lm_offload_to_cpu,
+        )
+        return self._lm_available
 
     def _init_lm_planner(
         self,
@@ -535,6 +572,14 @@ class ACEStepPipeline(BasePipeline):
             )
         )
         use_random_seed = seed == -1
+        needs_lm = self._lm_requested(
+            thinking=effective_thinking,
+            use_cot_metas=effective_use_cot_metas,
+            use_cot_caption=effective_use_cot_caption,
+            use_cot_language=effective_use_cot_language,
+            dcw_enabled=effective_dcw_enabled,
+        )
+        lm_handler = self._lm_handler if needs_lm and self._ensure_lm_planner() else None
 
         audio_tensors: list[Tensor] = []
 
@@ -613,7 +658,7 @@ class ACEStepPipeline(BasePipeline):
             with stdout_to_stderr():
                 result = upstream_generate_music(
                     self._handler,
-                    self._lm_handler if self._lm_available else None,
+                    lm_handler,
                     params=gen_params,
                     config=gen_config,
                     save_dir=None,
@@ -738,6 +783,7 @@ class ACEStepPipeline(BasePipeline):
         """Drop heavy ACE-Step handler references before cache eviction."""
         self._lm_handler = None
         self._lm_available = False
+        self._lm_init_attempted = False
         self._loaded_lora_adapters.clear()
 
         handler = getattr(self, "_handler", None)

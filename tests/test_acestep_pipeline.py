@@ -213,7 +213,8 @@ def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path
 
     assert audio.shape == (1, 2, 16)
     assert calls["initialize_service"]["use_mlx_dit"] is False
-    assert calls["generate_music"]["llm_handler"] is not None
+    assert "initialize_lm" not in calls
+    assert calls["generate_music"]["llm_handler"] is None
     params = calls["generate_music"]["params"]
     assert params.lyrics == ""
     assert params.vocal_language == "en"
@@ -232,6 +233,89 @@ def test_blank_lyrics_use_direct_sft_conditioning_defaults(monkeypatch, tmp_path
     config = calls["generate_music"]["config"]
     assert config.use_random_seed is False
     assert config.seeds == [123]
+
+
+def test_lm_planner_loads_lazily_when_thinking_requested(monkeypatch, tmp_path):
+    """ACE-Step LM should load only when the generation path needs it."""
+    calls = {}
+
+    class FakeAceStepHandler:
+        def initialize_service(self, **kwargs):
+            calls["initialize_service"] = kwargs
+            return "ok", True
+
+    class FakeLLMHandler:
+        def initialize(self, **kwargs):
+            calls["initialize_lm"] = kwargs
+            return "lm ok", True
+
+    class FakeGenerationParams:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class FakeGenerationConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    def fake_generate_music(dit_handler, llm_handler, params, config, save_dir=None, progress=None):
+        calls["generate_music"] = {
+            "llm_handler": llm_handler,
+            "params": params,
+            "config": config,
+            "save_dir": save_dir,
+        }
+        return SimpleNamespace(
+            success=True,
+            error=None,
+            status_message="ok",
+            audios=[{"tensor": torch.zeros(2, 16), "sample_rate": 48000}],
+        )
+
+    acestep_pkg = types.ModuleType("acestep")
+    handler_mod = types.ModuleType("acestep.handler")
+    handler_mod.AceStepHandler = FakeAceStepHandler
+    lm_mod = types.ModuleType("acestep.llm_inference")
+    lm_mod.LLMHandler = FakeLLMHandler
+    inference_mod = types.ModuleType("acestep.inference")
+    inference_mod.GenerationParams = FakeGenerationParams
+    inference_mod.GenerationConfig = FakeGenerationConfig
+    inference_mod.generate_music = fake_generate_music
+
+    monkeypatch.setitem(sys.modules, "acestep", acestep_pkg)
+    monkeypatch.setitem(sys.modules, "acestep.handler", handler_mod)
+    monkeypatch.setitem(sys.modules, "acestep.llm_inference", lm_mod)
+    monkeypatch.setitem(sys.modules, "acestep.inference", inference_mod)
+    monkeypatch.setenv("ANVIL_ACESTEP_USE_MLX_DIT", "0")
+
+    from anvil_audio.pipelines.acestep import ACEStepPipeline
+
+    pipe = ACEStepPipeline(
+        project_root=str(tmp_path),
+        config_path="acestep-v15-turbo",
+        device="cpu",
+        lm_model_path="acestep-5Hz-lm-1.7B",
+        default_params={
+            "steps": 8,
+            "cfg_scale": 1.0,
+            "thinking": True,
+            "use_cot_metas": True,
+            "use_cot_caption": False,
+            "use_cot_language": True,
+            "dcw_enabled": False,
+        },
+    )
+
+    assert "initialize_lm" not in calls
+
+    audio = pipe.generate(
+        [{"prompt": "anthemic rock", "lyrics": "[Instrumental]", "seconds_total": 10}],
+        seed=123,
+    )
+
+    assert audio.shape == (1, 2, 16)
+    assert calls["initialize_lm"]["lm_model_path"].endswith("acestep-5Hz-lm-1.7B")
+    assert calls["generate_music"]["llm_handler"] is not None
+    assert calls["generate_music"]["params"].thinking is True
 
 
 def test_apply_lora_adapter_delegates_to_acestep_handler(monkeypatch, tmp_path):

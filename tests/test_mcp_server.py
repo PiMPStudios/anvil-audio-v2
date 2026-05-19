@@ -178,6 +178,7 @@ def test_mcp_pipeline_cache_separates_mlx_dit_backends(monkeypatch):
     monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
     monkeypatch.setattr(registry_module, "load_pipeline", fake_load_pipeline)
     monkeypatch.setattr(mcp_server, "_pipeline_cache", {})
+    monkeypatch.setattr(mcp_server, "_pipeline_last_used", {})
 
     first = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=False)
     second = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=True)
@@ -188,6 +189,50 @@ def test_mcp_pipeline_cache_separates_mlx_dit_backends(monkeypatch):
     assert calls == [
         ("acestep-v1.5-sft", False),
         ("acestep-v1.5-sft", True),
+    ]
+
+
+def test_mcp_pipeline_cache_evicts_lru_when_policy_limit_is_reached(monkeypatch):
+    calls = []
+    unloaded = []
+
+    class FakeEntry:
+        pipeline_type = "acestep"
+
+    class FakePipeline:
+        def __init__(self, name):
+            self.name = name
+
+        def unload(self):
+            unloaded.append(self.name)
+
+    def fake_load_pipeline(name, **kwargs):
+        key = (name, kwargs.get("use_mlx_dit"))
+        calls.append(key)
+        return FakePipeline(f"{name}:{kwargs.get('use_mlx_dit')}")
+
+    registry_module = importlib.import_module("anvil_audio.core.registry")
+    monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
+    monkeypatch.setattr(registry_module, "load_pipeline", fake_load_pipeline)
+    monkeypatch.setattr(mcp_server, "_pipeline_cache", {})
+    monkeypatch.setattr(mcp_server, "_pipeline_last_used", {})
+    monkeypatch.setenv("ANVIL_MCP_MAX_PIPELINES", "2")
+
+    first = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=False)
+    second = mcp_server._get_pipeline("acestep-v1.5-sft", use_mlx_dit=True)
+    third = mcp_server._get_pipeline("acestep-v1.5-turbo", use_mlx_dit=False)
+
+    assert first is not second
+    assert third is not first
+    assert unloaded == ["acestep-v1.5-sft:False"]
+    assert list(mcp_server._pipeline_cache) == [
+        ("acestep-v1.5-sft", True),
+        ("acestep-v1.5-turbo", False),
+    ]
+    assert calls == [
+        ("acestep-v1.5-sft", False),
+        ("acestep-v1.5-sft", True),
+        ("acestep-v1.5-turbo", False),
     ]
 
 

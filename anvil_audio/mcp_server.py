@@ -69,6 +69,7 @@ mcp = FastMCP(
 # instance.  The override matters because ACE-Step LoRA requires the PyTorch
 # DiT path, while normal Apple Silicon generation may prefer native MLX DiT.
 _pipeline_cache: dict[tuple[str, bool | None], Any] = {}
+_pipeline_last_used: dict[tuple[str, bool | None], float] = {}
 
 # Default project applied when project="" is passed to any tool.
 _active_project: str = ""
@@ -104,6 +105,9 @@ _MUSIC_KEYWORDS = frozenset(
 )
 
 _VALID_BACKEND_LABELS = {"default", "mlx_dit", "torch_dit"}
+_DEFAULT_MAX_PIPELINES = 2
+_MAX_PIPELINES_ENV = "ANVIL_MCP_MAX_PIPELINES"
+_IDLE_TIMEOUT_ENV = "ANVIL_MCP_IDLE_TIMEOUT_SECONDS"
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +125,101 @@ def _backend_label(value: bool | None) -> str:
     if value is None:
         return "default"
     return "mlx_dit" if value else "torch_dit"
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return default
+
+
+def _pipeline_cache_policy() -> dict[str, Any]:
+    """Return MCP pipeline cache policy from env with safe defaults."""
+    return {
+        "max_pipelines": _env_int(_MAX_PIPELINES_ENV, _DEFAULT_MAX_PIPELINES),
+        "idle_timeout_seconds": _env_float(_IDLE_TIMEOUT_ENV, 0.0),
+    }
+
+
+def _pipeline_cache_key_label(key: tuple[str, bool | None]) -> dict[str, str]:
+    return {"model": key[0], "backend": _backend_label(key[1])}
+
+
+def _evict_pipeline_key(
+    key: tuple[str, bool | None],
+    *,
+    reason: str,
+) -> dict[str, Any] | None:
+    pipeline = _pipeline_cache.pop(key, None)
+    _pipeline_last_used.pop(key, None)
+    if pipeline is None:
+        return None
+
+    result: dict[str, Any] = _pipeline_cache_key_label(key)
+    result["reason"] = reason
+    result["release_actions"] = _release_pipeline(pipeline)
+    del pipeline
+    return result
+
+
+def _enforce_pipeline_cache_policy(
+    *,
+    incoming_key: tuple[str, bool | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Evict idle/LRU cached pipelines according to MCP cache policy."""
+    evicted: list[dict[str, Any]] = []
+    policy = _pipeline_cache_policy()
+    now = time.monotonic()
+
+    idle_timeout = float(policy["idle_timeout_seconds"])
+    if idle_timeout > 0:
+        for key, last_used in list(_pipeline_last_used.items()):
+            if key == incoming_key:
+                continue
+            if key not in _pipeline_cache:
+                _pipeline_last_used.pop(key, None)
+                continue
+            if now - last_used >= idle_timeout:
+                item = _evict_pipeline_key(key, reason="idle_timeout")
+                if item is not None:
+                    evicted.append(item)
+
+    max_pipelines = int(policy["max_pipelines"])
+    if max_pipelines <= 0:
+        return evicted
+
+    target_len = max_pipelines
+    if incoming_key is not None and incoming_key not in _pipeline_cache:
+        target_len = max(0, max_pipelines - 1)
+
+    while len(_pipeline_cache) > target_len:
+        candidates = [key for key in _pipeline_cache if key != incoming_key]
+        if not candidates:
+            break
+        lru_key = min(candidates, key=lambda key: _pipeline_last_used.get(key, 0.0))
+        item = _evict_pipeline_key(lru_key, reason="lru_max_pipelines")
+        if item is not None:
+            evicted.append(item)
+
+    return evicted
+
+
+def _touch_pipeline_cache_key(key: tuple[str, bool | None]) -> None:
+    _pipeline_last_used[key] = time.monotonic()
 
 
 def _flush_memory_caches() -> dict[str, Any]:
@@ -389,6 +488,13 @@ def _get_pipeline(model_name: str, *, use_mlx_dit: bool | None = None) -> Any:
         model_name,
         use_mlx_dit if entry is not None and entry.pipeline_type == "acestep" else None,
     )
+    evicted = _enforce_pipeline_cache_policy(incoming_key=cache_key)
+    for item in evicted:
+        _log(
+            "Evicted cached model: "
+            f"{item['model']} ({item['backend']}, {item['reason']})"
+        )
+
     if cache_key not in _pipeline_cache:
         suffix = ""
         if entry is not None and entry.pipeline_type == "acestep" and use_mlx_dit is not None:
@@ -405,6 +511,7 @@ def _get_pipeline(model_name: str, *, use_mlx_dit: bool | None = None) -> Any:
                 use_mlx_dit=use_mlx_dit,
             )
         _log(f"Model ready: {model_name}{suffix}")
+    _touch_pipeline_cache_key(cache_key)
     return _pipeline_cache[cache_key]
 
 
@@ -1046,6 +1153,7 @@ def get_memory_status(flush: bool = False) -> dict[str, Any]:
         "system_memory": _system_memory_status(),
         "torch_memory": _torch_memory_status(),
         "mlx_memory": _mlx_memory_status(),
+        "cache_policy": _pipeline_cache_policy(),
         "loaded_pipelines": _loaded_pipeline_summary(),
         "flush": flush_result,
     }
@@ -1087,6 +1195,7 @@ def unload_models(
             continue
 
         pipeline = _pipeline_cache.pop(key)
+        _pipeline_last_used.pop(key, None)
         unloaded.append(
             {
                 "model": model_name,

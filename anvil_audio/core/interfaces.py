@@ -242,6 +242,15 @@ class BasePipeline(ABC):
     def to(self, device: str | torch.device) -> "BasePipeline":
         """Move all internal modules to *device* and return ``self``."""
 
+    def unload(self) -> None:
+        """Release heavyweight resources before removing a pipeline from cache.
+
+        Concrete pipelines can override this to drop model references, clear
+        accelerator caches, or close external handles.  The default is a no-op
+        so older/simple pipelines remain compatible with cache eviction.
+        """
+        return None
+
     # ------------------------------------------------------------------
     # Concrete output method — inherited by all subclasses automatically
     # ------------------------------------------------------------------
