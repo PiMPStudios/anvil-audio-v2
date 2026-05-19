@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 BUNDLE_VERSION = "1.0"
+UTC = timezone.utc
 DEFAULT_INCLUDE = ("full-mix",)
 
 

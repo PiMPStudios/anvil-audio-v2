@@ -8,11 +8,12 @@ import shutil
 import stat
 import subprocess
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 CLOUD_JOB_VERSION = "0.1"
+UTC = timezone.utc
 DEFAULT_RECIPE = "lora-balanced"
 DEFAULT_REPO_URL = "https://github.com/PiMPStudios/anvil-audio-v2.git"
 ASSET_NAMES = ("full-mix", "instrumental", "vocals", "drums", "bass", "other")
@@ -49,7 +50,7 @@ ACESTEP_BOOTSTRAP_DEPENDENCIES = (
     "modelscope",
     "typer-slim>=0.21.1",
     "pytorch-wavelets>=1.3.0",
-    "pywavelets>=1.9.0",
+    "pywavelets>=1.8.0,<1.9.0",
 )
 
 
@@ -409,29 +410,60 @@ if [ ! -d .venv ]; then
 fi
 
 source .venv/bin/activate
-python - <<'PY' || true
+if ! python - <<'PY' >/dev/null 2>&1
+import torch
+assert torch.cuda.is_available()
+PY
+then
+  echo "Installing PyTorch CUDA wheels for bare GPU image..."
+  python -m pip install \\
+    --index-url "${{ANVIL_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}}" \\
+    "torch==${{ANVIL_TORCH_VERSION:-2.8.0}}" \\
+    "torchaudio==${{ANVIL_TORCHAUDIO_VERSION:-2.8.0}}"
+fi
+python - <<'PY'
 import torch
 print(f"Using torch {{torch.__version__}} from {{torch.__file__}}")
+print(f"CUDA available: {{torch.cuda.is_available()}}")
+if torch.cuda.is_available():
+    print(f"CUDA device: {{torch.cuda.get_device_name(0)}}")
 PY
 python -m pip install --upgrade pip wheel setuptools
 ANVIL_AUDIO_INSTALL="${{ANVIL_AUDIO_INSTALL:-{install_spec}}}"
 ACESTEP_INSTALL="${{ACESTEP_INSTALL:-{acestep_install_spec}}}"
-if [[ "$(uname -s)" == "Linux" ]]; then
-  python -m pip install \\
-    "git+{ACESTEP_REPO_URL}#subdirectory=acestep/third_parts/nano-vllm" \\
-    --ignore-requires-python
-fi
-python -m pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python
+CONSTRAINTS_FILE="$JOB_ROOT/work/pip-constraints.txt"
+mkdir -p "$JOB_ROOT/work"
+cat > "$CONSTRAINTS_FILE" <<'EOF'
+numpy<2.3
+pandas<3
+transformers<4.58
+huggingface-hub<1.0
+PyWavelets<1.9
+scikit-image<0.26
+scikit-learn<1.8
+contourpy<1.3.3
+scipy<1.16
+EOF
+python -m pip install -c "$CONSTRAINTS_FILE" "$ANVIL_AUDIO_INSTALL" --ignore-requires-python
 python -m pip install \\
   "$ANVIL_AUDIO_INSTALL" \\
+  -c "$CONSTRAINTS_FILE" \\
   --force-reinstall \\
   --no-cache-dir \\
   --no-deps \\
   --ignore-requires-python
 python -m pip install \\
   {acestep_dependencies} \\
+  -c "$CONSTRAINTS_FILE" \\
   --ignore-requires-python
-python -m pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python
+if [[ "$(uname -s)" == "Linux" ]]; then
+  python -m pip install \\
+    "git+{ACESTEP_REPO_URL}#subdirectory=acestep/third_parts/nano-vllm" \\
+    -c "$CONSTRAINTS_FILE" \\
+    --no-deps \\
+    --ignore-requires-python
+fi
+python -m pip install "$ACESTEP_INSTALL" -c "$CONSTRAINTS_FILE" --no-deps --ignore-requires-python
 CHECKPOINT_DIR="${{ANVIL_CHECKPOINT_DIR:-{checkpoint_dir}}}"
 REQUIRED_CHECKPOINT_MODELS='{checkpoint_models}'
 if [[ "${{ANVIL_SKIP_CHECKPOINT_DOWNLOAD:-0}}" != "1" ]]; then

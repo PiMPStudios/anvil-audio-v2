@@ -6,7 +6,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, Protocol
@@ -16,6 +16,7 @@ import torchaudio
 from anvil_audio.dataset_builder import analyze_audio_tensor
 
 SeparationMode = Literal["instrumental", "four-stem", "vocals"]
+UTC = timezone.utc
 
 DATASET_VERSION = "1.0"
 EXPECTED_STEMS: dict[SeparationMode, tuple[str, ...]] = {

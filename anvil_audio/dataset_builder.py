@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -21,6 +21,7 @@ from torchaudio import transforms as T
 
 CaptionMode = Literal["heuristic", "llm", "off"]
 TranscriptionBackend = Literal["auto", "lightning-whisper-mlx", "whisper"]
+UTC = timezone.utc
 
 AUDIO_EXTENSIONS = {
     ".aif",

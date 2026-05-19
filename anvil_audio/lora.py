@@ -17,11 +17,12 @@ import os
 import re
 import shutil
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 AdapterFormat = Literal["peft", "lokr", "anvil-native", "unknown"]
+UTC = timezone.utc
 
 _METADATA_FILENAME = "anvil_lora.json"
 _PEFT_CONFIG = "adapter_config.json"

@@ -7,7 +7,7 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 DEFAULT_EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
 DEFAULT_EMBEDDING_INSTRUCTION = ""
+UTC = timezone.utc
 
 
 @dataclass(slots=True)
