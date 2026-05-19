@@ -706,6 +706,60 @@ class ACEStepPipeline(BasePipeline):
             "status": status,
         }
 
+    def set_lora_enabled(self, enabled: bool) -> dict[str, Any]:
+        """Toggle an already-loaded ACE-Step LoRA adapter on or off."""
+        set_use_lora = getattr(self._handler, "set_use_lora", None)
+        if not callable(set_use_lora):
+            return {
+                "enabled": bool(enabled),
+                "message": "ACE-Step handler does not expose LoRA toggling.",
+                "status": {},
+            }
+
+        message = str(set_use_lora(bool(enabled)))
+        return {
+            "enabled": bool(enabled),
+            "message": message,
+            "status": self.lora_status(),
+        }
+
+    def lora_status(self) -> dict[str, Any]:
+        """Return the current ACE-Step LoRA status when available."""
+        get_status = getattr(self._handler, "get_lora_status", None)
+        if not callable(get_status):
+            return {}
+        try:
+            status = get_status()
+        except Exception as exc:
+            return {"error": str(exc)}
+        return status if isinstance(status, dict) else {"status": status}
+
+    def unload(self) -> None:
+        """Drop heavy ACE-Step handler references before cache eviction."""
+        self._lm_handler = None
+        self._lm_available = False
+        self._loaded_lora_adapters.clear()
+
+        handler = getattr(self, "_handler", None)
+        if handler is not None:
+            for attr in (
+                "model",
+                "vae",
+                "text_encoder",
+                "text_tokenizer",
+                "silence_latent",
+                "reward_model",
+                "mlx_decoder",
+                "mlx_vae",
+                "_base_decoder",
+            ):
+                if hasattr(handler, attr):
+                    try:
+                        setattr(handler, attr, None)
+                    except Exception:
+                        pass
+        self._handler = None
+
     def to(self, device: str | torch.device) -> "ACEStepPipeline":
         """No-op: ACE-Step initialises its device at construction time.
 

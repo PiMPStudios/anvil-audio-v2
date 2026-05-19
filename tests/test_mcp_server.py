@@ -94,6 +94,56 @@ def test_mcp_generate_applies_lora_and_records_metadata(monkeypatch, tmp_path):
     assert metadata["extra"]["use_mlx_dit"] is False
 
 
+def test_mcp_generate_without_lora_disables_cached_active_lora(monkeypatch, tmp_path):
+    monkeypatch.setattr(OutputManager, "DEFAULT_BASE", tmp_path / "outputs")
+
+    class FakeEntry:
+        name = "acestep-v1.5-sft"
+        pipeline_type = "acestep"
+        max_duration = 60.0
+
+        def resolved_params(self):
+            return {"steps": 4, "cfg_scale": 6.0, "sampler_type": "ode"}
+
+    class FakePipeline:
+        sample_rate = 10
+
+        def __init__(self):
+            self.is_lora_active = True
+            self.disable_calls = []
+
+        def lora_status(self):
+            return {"loaded": True, "active": self.is_lora_active}
+
+        def set_lora_enabled(self, enabled):
+            self.disable_calls.append(enabled)
+            self.is_lora_active = bool(enabled)
+            return {"enabled": enabled, "status": self.lora_status()}
+
+        def generate(self, *_args, **_kwargs):
+            return torch.zeros(1, 1, 20)
+
+    fake_pipeline = FakePipeline()
+    monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
+    monkeypatch.setattr(mcp_server, "_get_pipeline", lambda _name, **_kwargs: fake_pipeline)
+
+    result = mcp_server._run_generate(
+        prompt="dark blues",
+        model_name="acestep-v1.5-sft",
+        duration=1.0,
+        steps=None,
+        cfg_scale=None,
+        seed=123,
+        fmt="wav",
+        project="mcp-test",
+        lyrics="[Instrumental]",
+    )
+
+    assert "error" not in result
+    assert fake_pipeline.disable_calls == [False]
+    assert result["metadata"]["extra"]["lora_disabled_for_call"]["enabled"] is False
+
+
 def test_mcp_generate_accepts_per_call_mlx_dit_override(monkeypatch):
     captured = {}
 
@@ -139,6 +189,64 @@ def test_mcp_pipeline_cache_separates_mlx_dit_backends(monkeypatch):
         ("acestep-v1.5-sft", False),
         ("acestep-v1.5-sft", True),
     ]
+
+
+def test_mcp_memory_status_reports_loaded_pipelines(monkeypatch):
+    class FakePipeline:
+        def lora_status(self):
+            return {"loaded": True, "active": False}
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_pipeline_cache",
+        {("acestep-v1.5-sft", False): FakePipeline()},
+    )
+
+    status = mcp_server.get_memory_status()
+
+    assert status["pid"] > 0
+    assert status["loaded_pipelines"] == [
+        {
+            "model": "acestep-v1.5-sft",
+            "backend": "torch_dit",
+            "pipeline_class": "FakePipeline",
+            "lora_status": {"loaded": True, "active": False},
+        }
+    ]
+
+
+def test_mcp_unload_models_filters_by_backend(monkeypatch):
+    class FakePipeline:
+        def __init__(self):
+            self.unloaded = False
+
+        def unload(self):
+            self.unloaded = True
+
+    torch_pipeline = FakePipeline()
+    mlx_pipeline = FakePipeline()
+    cache = {
+        ("acestep-v1.5-sft", False): torch_pipeline,
+        ("acestep-v1.5-sft", True): mlx_pipeline,
+    }
+    monkeypatch.setattr(mcp_server, "_pipeline_cache", cache)
+
+    result = mcp_server.unload_models(
+        model="acestep-v1.5-sft",
+        backend="torch_dit",
+        flush=False,
+    )
+
+    assert result["unloaded"] == [
+        {
+            "model": "acestep-v1.5-sft",
+            "backend": "torch_dit",
+            "release_actions": ["unload"],
+        }
+    ]
+    assert torch_pipeline.unloaded is True
+    assert mlx_pipeline.unloaded is False
+    assert list(cache) == [("acestep-v1.5-sft", True)]
 
 
 def test_mcp_server_no_mlx_dit_flag_sets_env(monkeypatch):

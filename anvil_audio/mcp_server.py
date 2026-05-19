@@ -27,9 +27,10 @@ except ImportError:
     pass
 
 import argparse
+import gc
 import json
-import time
 import os
+import time
 import numpy as np
 from datetime import datetime
 from pathlib import Path
@@ -102,6 +103,8 @@ _MUSIC_KEYWORDS = frozenset(
     }
 )
 
+_VALID_BACKEND_LABELS = {"default", "mlx_dit", "torch_dit"}
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -111,6 +114,211 @@ _MUSIC_KEYWORDS = frozenset(
 def _log(msg: str) -> None:
     """Write a status message to stderr (stdout is reserved for MCP protocol)."""
     print(f"[anvil-mcp] {msg}", file=sys.stderr, flush=True)
+
+
+def _backend_label(value: bool | None) -> str:
+    """Return the user-facing backend label for a pipeline cache key."""
+    if value is None:
+        return "default"
+    return "mlx_dit" if value else "torch_dit"
+
+
+def _flush_memory_caches() -> dict[str, Any]:
+    """Best-effort Python, torch, and MLX cache cleanup."""
+    actions: list[str] = []
+    collected = gc.collect()
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            actions.append("torch.cuda.empty_cache")
+            try:
+                torch.cuda.synchronize()
+                actions.append("torch.cuda.synchronize")
+            except RuntimeError:
+                pass
+        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+            torch.mps.empty_cache()
+            actions.append("torch.mps.empty_cache")
+            synchronize = getattr(torch.mps, "synchronize", None)
+            if callable(synchronize):
+                synchronize()
+                actions.append("torch.mps.synchronize")
+    except Exception as exc:
+        actions.append(f"torch cleanup skipped: {exc}")
+
+    try:
+        import mlx.core as mx
+
+        clear_cache = getattr(mx, "clear_cache", None)
+        if callable(clear_cache):
+            clear_cache()
+            actions.append("mlx.clear_cache")
+        metal = getattr(mx, "metal", None)
+        metal_clear_cache = getattr(metal, "clear_cache", None)
+        if callable(metal_clear_cache):
+            metal_clear_cache()
+            actions.append("mlx.metal.clear_cache")
+    except Exception as exc:
+        actions.append(f"mlx cleanup skipped: {exc}")
+
+    return {"gc_collected": collected, "actions": actions}
+
+
+def _process_rss_mb() -> float | None:
+    """Return current process RSS in MB when it can be measured cheaply."""
+    try:
+        import psutil
+
+        return psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+
+        raw = subprocess.check_output(
+            ["ps", "-o", "rss=", "-p", str(os.getpid())],
+            text=True,
+        ).strip()
+        return int(raw) / 1024 if raw else None
+    except Exception:
+        return None
+
+
+def _system_memory_status() -> dict[str, Any]:
+    """Return system memory details when psutil is installed."""
+    try:
+        import psutil
+
+        vm = psutil.virtual_memory()
+        return {
+            "total_gb": round(vm.total / (1024**3), 2),
+            "available_gb": round(vm.available / (1024**3), 2),
+            "used_percent": vm.percent,
+        }
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+
+def _torch_memory_status() -> dict[str, Any]:
+    """Return accelerator memory stats exposed by torch."""
+    status: dict[str, Any] = {}
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            status["cuda"] = {
+                "allocated_mb": round(torch.cuda.memory_allocated() / (1024**2), 2),
+                "reserved_mb": round(torch.cuda.memory_reserved() / (1024**2), 2),
+                "peak_allocated_mb": round(
+                    torch.cuda.max_memory_allocated() / (1024**2), 2
+                ),
+            }
+
+        mps_stats: dict[str, Any] = {}
+        mps = getattr(torch, "mps", None)
+        for name in (
+            "current_allocated_memory",
+            "driver_allocated_memory",
+            "recommended_max_memory",
+        ):
+            fn = getattr(mps, name, None)
+            if callable(fn):
+                try:
+                    mps_stats[f"{name}_mb"] = round(fn() / (1024**2), 2)
+                except Exception:
+                    pass
+        if mps_stats:
+            status["mps"] = mps_stats
+    except Exception as exc:
+        status["error"] = str(exc)
+    return status
+
+
+def _mlx_memory_status() -> dict[str, Any]:
+    """Return MLX memory stats when MLX is importable."""
+    try:
+        import mlx.core as mx
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+    status: dict[str, Any] = {"available": True}
+    for name in ("get_active_memory", "get_cache_memory", "get_peak_memory"):
+        fn = getattr(mx, name, None)
+        if callable(fn):
+            try:
+                status[f"{name.removeprefix('get_')}_mb"] = round(
+                    fn() / (1024**2), 2
+                )
+            except Exception:
+                pass
+    return status
+
+
+def _pipeline_lora_status(pipeline: Any) -> dict[str, Any]:
+    """Return LoRA status for a pipeline if it exposes one."""
+    status_fn = getattr(pipeline, "lora_status", None)
+    if not callable(status_fn):
+        return {}
+    try:
+        status = status_fn()
+    except Exception as exc:
+        return {"error": str(exc)}
+    return status if isinstance(status, dict) else {"status": status}
+
+
+def _loaded_pipeline_summary() -> list[dict[str, Any]]:
+    """Return a compact summary of loaded cached pipelines."""
+    result = []
+    for (model_name, backend), pipeline in _pipeline_cache.items():
+        item = {
+            "model": model_name,
+            "backend": _backend_label(backend),
+            "pipeline_class": pipeline.__class__.__name__,
+        }
+        lora_status = _pipeline_lora_status(pipeline)
+        if lora_status:
+            item["lora_status"] = lora_status
+        result.append(item)
+    return result
+
+
+def _release_pipeline(pipeline: Any) -> list[str]:
+    """Best-effort release hook before deleting a cached pipeline."""
+    actions = []
+    for method_name in ("unload", "close", "cleanup"):
+        method = getattr(pipeline, method_name, None)
+        if callable(method):
+            try:
+                method()
+                actions.append(method_name)
+            except Exception as exc:
+                actions.append(f"{method_name} failed: {exc}")
+            break
+    return actions
+
+
+def _disable_lora_for_plain_call(pipeline: Any) -> dict[str, Any] | None:
+    """Disable an active cached LoRA when a call intentionally omits lora=."""
+    status = _pipeline_lora_status(pipeline)
+    if not status.get("loaded") or not status.get("active"):
+        return None
+
+    toggle = getattr(pipeline, "set_lora_enabled", None)
+    if callable(toggle):
+        result = toggle(False)
+        return result if isinstance(result, dict) else {"message": str(result)}
+
+    handler = getattr(pipeline, "_handler", None)
+    set_use_lora = getattr(handler, "set_use_lora", None)
+    if callable(set_use_lora):
+        message = str(set_use_lora(False))
+        return {"message": message, "status": _pipeline_lora_status(pipeline)}
+
+    return {"warning": "Loaded LoRA is active but this pipeline cannot disable it."}
 
 
 def _parse_server_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
@@ -311,6 +519,10 @@ def _run_generate(
             "registry_id": lora_entry.id if lora_entry else None,
             "status": lora_status,
         }
+    elif is_acestep:
+        disabled_lora = _disable_lora_for_plain_call(pipeline)
+        if disabled_lora is not None:
+            extra["lora_disabled_for_call"] = disabled_lora
 
     gen_kwargs: dict[str, Any] = {"cfg_scale": effective_cfg}
     if not is_acestep:
@@ -804,13 +1016,7 @@ def list_models() -> list[dict[str, Any]]:
                 "default_params": entry.resolved_params(),
                 "is_loaded": entry.name in loaded,
                 "loaded_backends": [
-                    (
-                        "default"
-                        if key[1] is None
-                        else "mlx_dit"
-                        if key[1]
-                        else "torch_dit"
-                    )
+                    _backend_label(key[1])
                     for key in _pipeline_cache
                     if key[0] == entry.name
                 ],
@@ -819,6 +1025,89 @@ def list_models() -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+@mcp.tool()
+def get_memory_status(flush: bool = False) -> dict[str, Any]:
+    """Report MCP process memory, accelerator cache stats, and loaded models.
+
+    Args:
+        flush: If true, run Python GC plus torch/MLX cache cleanup before
+               reporting memory. This does not unload model weights.
+
+    Returns:
+        dict with process RSS, system memory details when available, torch/MLX
+        accelerator stats, and cached pipeline/Lora state.
+    """
+    flush_result = _flush_memory_caches() if flush else None
+    return {
+        "pid": os.getpid(),
+        "process_rss_mb": _process_rss_mb(),
+        "system_memory": _system_memory_status(),
+        "torch_memory": _torch_memory_status(),
+        "mlx_memory": _mlx_memory_status(),
+        "loaded_pipelines": _loaded_pipeline_summary(),
+        "flush": flush_result,
+    }
+
+
+@mcp.tool()
+def unload_models(
+    model: str = "",
+    backend: str = "",
+    flush: bool = True,
+) -> dict[str, Any]:
+    """Unload cached model pipelines from this MCP server process.
+
+    Args:
+        model: Optional registry model name to unload. Empty unloads all models.
+        backend: Optional backend filter: default, mlx_dit, or torch_dit.
+        flush: Run Python GC plus torch/MLX cache cleanup after unloading.
+
+    Returns:
+        dict describing unloaded cache entries and remaining loaded pipelines.
+    """
+    model_filter = model.strip()
+    backend_filter = backend.strip().lower().replace("-", "_")
+    if backend_filter and backend_filter not in _VALID_BACKEND_LABELS:
+        return {
+            "error": (
+                "backend must be one of: "
+                + ", ".join(sorted(_VALID_BACKEND_LABELS))
+            )
+        }
+
+    unloaded: list[dict[str, Any]] = []
+    for key in list(_pipeline_cache):
+        model_name, backend_value = key
+        backend_label = _backend_label(backend_value)
+        if model_filter and model_name != model_filter:
+            continue
+        if backend_filter and backend_label != backend_filter:
+            continue
+
+        pipeline = _pipeline_cache.pop(key)
+        unloaded.append(
+            {
+                "model": model_name,
+                "backend": backend_label,
+                "release_actions": _release_pipeline(pipeline),
+            }
+        )
+        del pipeline
+
+    flush_result = _flush_memory_caches() if flush else None
+    return {
+        "unloaded": unloaded,
+        "remaining_loaded_pipelines": _loaded_pipeline_summary(),
+        "memory": {
+            "process_rss_mb": _process_rss_mb(),
+            "system_memory": _system_memory_status(),
+            "torch_memory": _torch_memory_status(),
+            "mlx_memory": _mlx_memory_status(),
+        },
+        "flush": flush_result,
+    }
 
 
 @mcp.tool()
@@ -875,7 +1164,7 @@ def get_model_info(model: str) -> dict[str, Any]:
         "supported_features": features,
         "is_loaded": any(key[0] == entry.name for key in _pipeline_cache),
         "loaded_backends": [
-            "default" if key[1] is None else "mlx_dit" if key[1] else "torch_dit"
+            _backend_label(key[1])
             for key in _pipeline_cache
             if key[0] == entry.name
         ],

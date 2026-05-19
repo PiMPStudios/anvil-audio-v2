@@ -856,6 +856,8 @@ the MCP server process before any model is loaded.
 | `list_lora_adapters` | List registered LoRA adapters for ACE-Step generation |
 | `list_models` | All registered models with type, limits, and loaded status |
 | `get_model_info` | Full details for one model |
+| `get_memory_status` | Report MCP process memory, accelerator cache stats, loaded models, and LoRA state |
+| `unload_models` | Drop cached model pipelines from the MCP process and flush memory caches |
 | `list_recent_outputs` | Recent output files with their metadata, newest-first |
 | `get_generation_metadata` | Read the sidecar for any output file |
 | `list_projects` | Project folders under `~/anvil-audio-outputs/` |
@@ -890,6 +892,17 @@ Models are loaded lazily on first use and cached between calls — switching bet
 two models during a session only pays the load cost once per model. ACE-Step
 keeps separate cached instances for the default, MLX DiT, and PyTorch DiT
 backend variants when those variants are requested.
+
+If an ACE-Step pipeline has a LoRA loaded, a later MCP generation with no
+`lora` argument explicitly disables the active adapter before generating. This
+keeps A/B tests honest when comparing a tuned adapter against the base model.
+Use `get_memory_status(flush=true)` to inspect loaded model/backends and clear
+unused torch/MLX caches without unloading weights. Use `unload_models()` to
+drop all cached pipelines, or target one backend:
+
+```text
+unload_models(model="acestep-v1.5-xl-sft", backend="torch_dit")
+```
 
 ### Claude Desktop config
 
