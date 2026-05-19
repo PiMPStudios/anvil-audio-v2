@@ -833,6 +833,18 @@ The MCP runtime is included in the default install. If you installed with
 .venv/bin/python -m anvil_audio.mcp_server
 ```
 
+For ACE-Step LoRA generation on Apple Silicon, start the MCP server with
+`--no-mlx-dit`. PEFT/LoKr adapters currently patch ACE-Step's PyTorch DiT, so
+the server needs the PyTorch DiT backend when a LoRA is selected:
+
+```bash
+.venv/bin/python -m anvil_audio.mcp_server --no-mlx-dit
+```
+
+Use `--use-mlx-dit` to explicitly force the native MLX DiT/VAE path for normal
+non-LoRA ACE-Step generation. These flags set `ANVIL_ACESTEP_USE_MLX_DIT` for
+the MCP server process before any model is loaded.
+
 ### Available tools
 
 | Tool | What it does |
@@ -880,13 +892,14 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`
   "mcpServers": {
     "anvil-audio": {
       "command": "/path/to/anvil-audio-v2/.venv/bin/python",
-      "args": ["-m", "anvil_audio.mcp_server"]
+      "args": ["-m", "anvil_audio.mcp_server", "--no-mlx-dit"]
     }
   }
 }
 ```
 
-Replace `/path/to/anvil-audio-v2` with the absolute path to your clone.
+Replace `/path/to/anvil-audio-v2` with the absolute path to your clone. Remove
+`--no-mlx-dit` if you do not need ACE-Step LoRA generation through MCP.
 
 ### Claude Code config
 
@@ -897,7 +910,7 @@ Add to `~/.claude.json` under `mcpServers`:
   "mcpServers": {
     "anvil-audio": {
       "command": "/path/to/anvil-audio-v2/.venv/bin/python",
-      "args": ["-m", "anvil_audio.mcp_server"],
+      "args": ["-m", "anvil_audio.mcp_server", "--no-mlx-dit"],
       "type": "stdio"
     }
   }

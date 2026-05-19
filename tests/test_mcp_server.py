@@ -83,3 +83,25 @@ def test_mcp_generate_applies_lora_and_records_metadata(monkeypatch, tmp_path):
     assert metadata["extra"]["lora"]["registry_id"] == "dark-blues"
     assert metadata["extra"]["lora"]["scale"] == 0.75
     assert metadata["extra"]["lyrics"] == "[Instrumental]"
+
+
+def test_mcp_server_no_mlx_dit_flag_sets_env(monkeypatch):
+    monkeypatch.delenv("ANVIL_ACESTEP_USE_MLX_DIT", raising=False)
+
+    args, remaining = mcp_server._parse_server_args(["--no-mlx-dit", "--extra"])
+    mcp_server._apply_server_args(args)
+
+    assert remaining == ["--extra"]
+    assert args.no_mlx_dit is True
+    assert mcp_server.os.environ["ANVIL_ACESTEP_USE_MLX_DIT"] == "0"
+
+
+def test_mcp_server_use_mlx_dit_flag_overrides_env(monkeypatch):
+    monkeypatch.setenv("ANVIL_ACESTEP_USE_MLX_DIT", "0")
+
+    args, remaining = mcp_server._parse_server_args(["--use-mlx-dit"])
+    mcp_server._apply_server_args(args)
+
+    assert remaining == []
+    assert args.use_mlx_dit is True
+    assert mcp_server.os.environ["ANVIL_ACESTEP_USE_MLX_DIT"] == "1"

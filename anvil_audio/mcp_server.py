@@ -26,8 +26,10 @@ try:
 except ImportError:
     pass
 
+import argparse
 import json
 import time
+import os
 import numpy as np
 from datetime import datetime
 from pathlib import Path
@@ -107,6 +109,42 @@ _MUSIC_KEYWORDS = frozenset(
 def _log(msg: str) -> None:
     """Write a status message to stderr (stdout is reserved for MCP protocol)."""
     print(f"[anvil-mcp] {msg}", file=sys.stderr, flush=True)
+
+
+def _parse_server_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
+    """Parse MCP server flags and return any unconsumed args for FastMCP."""
+    parser = argparse.ArgumentParser(
+        prog="python -m anvil_audio.mcp_server",
+        description="Run the Anvil Audio MCP server over stdio.",
+    )
+    mlx_group = parser.add_mutually_exclusive_group()
+    mlx_group.add_argument(
+        "--no-mlx-dit",
+        action="store_true",
+        help=(
+            "Disable ACE-Step native MLX DiT/VAE for this MCP server process. "
+            "Use this when generating with ACE-Step PEFT/LoKr LoRA adapters."
+        ),
+    )
+    mlx_group.add_argument(
+        "--use-mlx-dit",
+        action="store_true",
+        help=(
+            "Force ACE-Step native MLX DiT/VAE for this MCP server process. "
+            "Overrides ANVIL_ACESTEP_USE_MLX_DIT."
+        ),
+    )
+    return parser.parse_known_args(argv)
+
+
+def _apply_server_args(args: argparse.Namespace) -> None:
+    """Apply process-level MCP server options before any model is loaded."""
+    if args.no_mlx_dit:
+        os.environ["ANVIL_ACESTEP_USE_MLX_DIT"] = "0"
+        _log("ACE-Step native MLX DiT/VAE disabled for this MCP server")
+    elif args.use_mlx_dit:
+        os.environ["ANVIL_ACESTEP_USE_MLX_DIT"] = "1"
+        _log("ACE-Step native MLX DiT/VAE forced on for this MCP server")
 
 
 def _is_music_prompt(prompt: str) -> bool:
@@ -947,6 +985,9 @@ def set_active_project(project: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    server_args, remaining_argv = _parse_server_args(sys.argv[1:])
+    sys.argv = [sys.argv[0], *remaining_argv]
+    _apply_server_args(server_args)
     _log("Anvil Audio MCP server starting (stdio transport)")
     _log(f"Registry: {len(registry.list_models())} model(s) available")
     for entry in registry.list_models():
