@@ -39,11 +39,15 @@ GPU instance gives Anvil a clean training lane:
 - run validation generations on every checkpoint
 - keep cloud cost bounded with hard runtime limits and auto-destroy
 
-The first provider target should be a simple API-driven VM provider. DigitalOcean
-GPU Droplets are a good early fit because they expose normal SSH machines,
-API/CLI creation, and H200 shapes. RunPod is the first implemented API launcher.
-Other providers such as Lambda, Vast, or CoreWeave can be considered later
-behind the same abstraction.
+The first provider target should be a simple API-driven VM provider.
+DigitalOcean GPU Droplets are worth watching because they expose normal SSH
+machines, API/CLI creation, and H200 shapes, but availability can be limited.
+RunPod is the first implemented API launcher. Other providers such as Lambda,
+Vast, or CoreWeave can be considered later behind the same abstraction.
+
+If DigitalOcean has the GPU capacity you need and you create an account from
+this project, this referral link helps offset Anvil training costs:
+[m.do.co/c/aa4e66218064](https://m.do.co/c/aa4e66218064).
 
 ## Cloud Runner Shape
 
