@@ -61,15 +61,25 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert "download_main_model" in bootstrap_text
     assert "download_submodel" in bootstrap_text
     assert 'REQUIRED_CHECKPOINT_MODELS=\'["main", "acestep-v15-sft"]\'' in bootstrap_text
-    assert 'pip install "$ANVIL_AUDIO_INSTALL" --ignore-requires-python' in bootstrap_text
+    assert 'pip install -c "$CONSTRAINTS_FILE" "$ANVIL_AUDIO_INSTALL"' in bootstrap_text
+    assert "scikit-learn<1.8" in bootstrap_text
     assert "--force-reinstall" in bootstrap_text
     assert "--no-cache-dir" in bootstrap_text
-    assert 'pip install "$ACESTEP_INSTALL" --no-deps --ignore-requires-python' in bootstrap_text
+    assert 'pip install "$ACESTEP_INSTALL" -c "$CONSTRAINTS_FILE" --no-deps' in bootstrap_text
 
     training_text = (output_dir / "scripts/run_training.sh").read_text(
         encoding="utf-8"
     )
     assert 'rm -rf "$TENSOR_DIR"' in training_text
+
+    collect_text = (output_dir / "scripts/collect.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "anvil_cloud_collect" in collect_text
+    assert "outputs/lora/final" in collect_text
+    assert "outputs/lora/checkpoints.txt" in collect_text
+    assert "tar -czf \"$ARCHIVE\" -C \"$COLLECT_DIR\" ." in collect_text
+    assert "tar -czf outputs/anvil_cloud_results.tar.gz job.json" not in collect_text
 
 
 def test_create_cloud_job_package_fails_without_primary_assets(tmp_path):
@@ -109,7 +119,9 @@ def test_plan_ssh_run_builds_dry_run_commands(tmp_path):
     assert "scripts/bootstrap.sh" in commands[2][-1]
     assert "scripts/run_training.sh" in commands[3][-1]
     assert "scripts/collect.sh" in commands[4][-1]
+    assert commands[5][:2] == ["mkdir", "-p"]
     assert commands[-1][0] == "rsync"
+    assert "outputs/anvil_cloud_collect/" in commands[-1][-2]
 
 
 def test_gpufindr_url_includes_remote_filters():

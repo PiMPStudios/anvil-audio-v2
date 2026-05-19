@@ -278,8 +278,10 @@ anvil cloud run-ssh ./cloud-jobs/my_style_h200 \
     --dry-run
 ```
 
-Remove `--dry-run` when the commands look right. Add `--collect` to package and
-sync `outputs/` plus `logs/` back after training.
+Remove `--dry-run` when the commands look right. Add `--collect` to sync the
+final adapter, logs, job manifests, a checkpoint listing, and a small results
+archive back into `remote_artifacts/`. Full checkpoint state stays on the
+remote host unless you copy it manually.
 
 `anvil cloud search` uses GPUFindr's public read-only catalog. It is only a
 provider discovery step. The RunPod adapter can create pods through RunPod's

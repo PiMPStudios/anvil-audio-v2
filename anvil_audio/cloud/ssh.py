@@ -129,20 +129,17 @@ def _rsync_collect_commands(
     artifacts_dir = job_dir / "remote_artifacts"
     return [
         [
-            "rsync",
-            "-az",
-            "-e",
-            _rsync_ssh_transport(config),
-            f"{config.host}:{remote_job_dir}/outputs/",
-            f"{artifacts_dir}/outputs/",
+            "mkdir",
+            "-p",
+            str(artifacts_dir),
         ],
         [
             "rsync",
             "-az",
             "-e",
             _rsync_ssh_transport(config),
-            f"{config.host}:{remote_job_dir}/logs/",
-            f"{artifacts_dir}/logs/",
+            f"{config.host}:{remote_job_dir}/outputs/anvil_cloud_collect/",
+            f"{artifacts_dir}/",
         ],
     ]
 

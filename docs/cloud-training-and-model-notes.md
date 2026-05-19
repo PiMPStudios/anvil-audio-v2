@@ -107,8 +107,10 @@ featured GPUs. For `--gpu-type`, use the `gpuId` value from
 `NVIDIA A100-SXM4-80GB`. Remove `--dry-run` when the remote commands look
 right. The runner uploads the job with `rsync`, runs `scripts/bootstrap.sh`,
 then runs `scripts/run_training.sh`. Passing `--collect` also runs
-`scripts/collect.sh` and syncs `outputs/` plus `logs/` back into
-`remote_artifacts/`.
+`scripts/collect.sh` and syncs a slim bundle back into `remote_artifacts/`:
+the final adapter, logs, job manifests, a checkpoint listing, and a small
+`anvil_cloud_results.tar.gz`. Full epoch checkpoint state remains on the
+remote host unless you copy it manually.
 
 The generated bootstrap creates a system-site-packages venv so managed GPU
 images can keep their baked-in CUDA/PyTorch stack. It installs Anvil from the

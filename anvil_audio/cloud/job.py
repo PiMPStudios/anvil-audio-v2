@@ -582,9 +582,33 @@ set -euo pipefail
 JOB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$JOB_ROOT"
 
-mkdir -p outputs
-tar -czf outputs/anvil_cloud_results.tar.gz job.json training_bundle.json logs outputs/lora
-echo "Results archive: $JOB_ROOT/outputs/anvil_cloud_results.tar.gz"
+COLLECT_DIR="outputs/anvil_cloud_collect"
+ARCHIVE="outputs/anvil_cloud_results.tar.gz"
+
+rm -rf "$COLLECT_DIR"
+mkdir -p "$COLLECT_DIR/outputs/lora"
+
+cp job.json training_bundle.json "$COLLECT_DIR/"
+if [[ -d logs ]]; then
+  cp -a logs "$COLLECT_DIR/logs"
+fi
+
+if [[ -d outputs/lora/final ]]; then
+  cp -a outputs/lora/final "$COLLECT_DIR/outputs/lora/final"
+else
+  echo "[WARN] Final LoRA adapter not found at outputs/lora/final" >&2
+fi
+
+if [[ -d outputs/lora/checkpoints ]]; then
+  find outputs/lora/checkpoints -maxdepth 1 -mindepth 1 -type d \\
+    -printf "%f\\n" | sort -V > "$COLLECT_DIR/outputs/lora/checkpoints.txt"
+fi
+
+tar -czf "$ARCHIVE" -C "$COLLECT_DIR" .
+cp "$ARCHIVE" "$COLLECT_DIR/outputs/anvil_cloud_results.tar.gz"
+
+echo "Slim collect dir: $JOB_ROOT/$COLLECT_DIR"
+echo "Results archive: $JOB_ROOT/$ARCHIVE"
 """
 
 

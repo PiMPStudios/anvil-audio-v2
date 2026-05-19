@@ -1132,7 +1132,7 @@ load and prints the explicit install command.
 | `--identity-file` | default SSH config | Optional SSH private key |
 | `--skip-bootstrap` | off | Reuse an already bootstrapped remote job folder |
 | `--no-train` | off | Upload/bootstrap only |
-| `--collect` | off | Sync remote `outputs/` and `logs/` back after training |
+| `--collect` | off | Sync a slim final-adapter bundle plus logs after training |
 | `--gpu-type` | required | RunPod `gpuId`, e.g. `NVIDIA H200` |
 | `--cloud-type` | `ALL` | RunPod cloud type: `ALL`, `SECURE`, or `COMMUNITY` |
 | `--minimal` | off | Send a UI-like minimal RunPod launch request |
