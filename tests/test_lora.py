@@ -154,6 +154,20 @@ def test_build_train_command_targets_fixed_trainer(tmp_path):
     assert command[command.index("--rank") + 1] == "8"
 
 
+def test_build_train_command_maps_xl_alias_for_acestep_cli(tmp_path):
+    config = LoRATrainConfig(
+        tensor_dir=tmp_path / "tensors",
+        output_dir=tmp_path / "out",
+        checkpoint_dir=tmp_path / "checkpoints",
+        model_variant="xl_sft",
+    )
+
+    command = build_train_command(config)
+
+    assert command[command.index("--model-variant") + 1] == "acestep-v15-xl-sft"
+    assert command[command.index("--base-model") + 1] == "xl_sft"
+
+
 def test_build_train_command_can_force_basic_loop(tmp_path):
     config = LoRATrainConfig(
         tensor_dir=tmp_path / "tensors",

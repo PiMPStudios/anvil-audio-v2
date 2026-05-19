@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+ACESTEP_TRAINING_VARIANT_DIRS = {
+    "xl_turbo": "acestep-v15-xl-turbo",
+    "xl_base": "acestep-v15-xl-base",
+    "xl_sft": "acestep-v15-xl-sft",
+}
+
 
 @dataclass(slots=True)
 class LoRATrainConfig:
@@ -194,6 +200,14 @@ def preprocess_for_acestep(
 
 def build_train_command(config: LoRATrainConfig) -> list[str]:
     """Build the subprocess command for ACE-Step fixed LoRA training."""
+    model_variant = ACESTEP_TRAINING_VARIANT_DIRS.get(
+        config.model_variant,
+        config.model_variant,
+    )
+    base_model = config.base_model
+    if base_model is None and model_variant != config.model_variant:
+        base_model = config.model_variant
+
     args: list[str] = []
     if config.plain:
         args.append("--plain")
@@ -204,7 +218,7 @@ def build_train_command(config: LoRATrainConfig) -> list[str]:
             "--checkpoint-dir",
             str(config.checkpoint_dir.expanduser().resolve()),
             "--model-variant",
-            config.model_variant,
+            model_variant,
             "--dataset-dir",
             str(config.tensor_dir.expanduser().resolve()),
             "--output-dir",
@@ -239,8 +253,8 @@ def build_train_command(config: LoRATrainConfig) -> list[str]:
             *config.target_modules,
         ]
     )
-    if config.base_model:
-        args.extend(["--base-model", config.base_model])
+    if base_model:
+        args.extend(["--base-model", base_model])
     if config.num_workers is not None:
         args.extend(["--num-workers", str(config.num_workers)])
 

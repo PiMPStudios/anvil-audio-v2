@@ -91,7 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(default_checkpoint_dir()),
         help="ACE-Step checkpoints root.",
     )
-    preprocess.add_argument("--model-variant", default="sft", help="turbo/base/sft.")
+    preprocess.add_argument(
+        "--model-variant",
+        default="sft",
+        help="turbo/base/sft/xl_turbo/xl_base/xl_sft or custom folder.",
+    )
     preprocess.add_argument(
         "--max-duration",
         type=float,
@@ -122,7 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(default_checkpoint_dir()),
         help="ACE-Step checkpoints root.",
     )
-    train.add_argument("--model-variant", default="sft", help="turbo/base/sft.")
+    train.add_argument(
+        "--model-variant",
+        default="sft",
+        help="turbo/base/sft/xl_turbo/xl_base/xl_sft or custom folder.",
+    )
     train.add_argument(
         "--base-model",
         default=None,
