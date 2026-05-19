@@ -41,8 +41,9 @@ GPU instance gives Anvil a clean training lane:
 
 The first provider target should be a simple API-driven VM provider. DigitalOcean
 GPU Droplets are a good early fit because they expose normal SSH machines,
-API/CLI creation, and H200 shapes. Other providers such as RunPod, Lambda, Vast,
-or CoreWeave can be considered later behind the same abstraction.
+API/CLI creation, and H200 shapes. RunPod is the first implemented API launcher.
+Other providers such as Lambda, Vast, or CoreWeave can be considered later
+behind the same abstraction.
 
 ## Cloud Runner Shape
 
@@ -53,8 +54,8 @@ single button.
 anvil cloud doctor
 anvil cloud package
 anvil cloud run-ssh
-anvil cloud launch
-anvil cloud destroy
+anvil cloud runpod launch
+anvil cloud runpod terminate
 ```
 
 The first implemented slice is provider-agnostic packaging plus an SSH runner.
@@ -94,7 +95,10 @@ anvil cloud run-ssh ~/Developer/TrainingDatasets/cloud-jobs/dark-blues-h200 \
 see whether suitable GPUs exist before creating provider accounts or entering
 billing details. `anvil cloud runpod launch` prepares a RunPod
 `podFindAndDeployOnDemand` GraphQL request and requires `RUNPOD_API_KEY` unless
-it is run with `--dry-run`. The default RunPod launch uses template
+it is run with `--dry-run`. If you create a RunPod account from this project,
+the referral link
+[runpod.io?ref=sox5p475](https://runpod.io?ref=sox5p475) helps offset Anvil
+training costs. The default RunPod launch uses template
 `runpod-torch-v280`, matching the deploy URLs returned by GPUFindr for RunPod
 H200/H100/A100 offers. Add `--minimal` when RunPod's allocator rejects the
 extra disk or minimum machine constraints even though the UI still shows

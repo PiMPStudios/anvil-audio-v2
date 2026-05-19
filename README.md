@@ -663,7 +663,9 @@ later without changing the job format.
 `anvil cloud search` uses GPUFindr's read-only public GPU catalog to show live
 provider availability and pricing before you create an account somewhere.
 `anvil cloud runpod launch` uses RunPod's GraphQL pod API; keep `--dry-run` on
-until the request looks right, then remove it to create a pod. The default
+until the request looks right, then remove it to create a pod. If you create a
+RunPod account from the docs, this referral link helps offset Anvil training
+costs: [runpod.io?ref=sox5p475](https://runpod.io?ref=sox5p475). The default
 RunPod launch uses template `runpod-torch-v280`, matching RunPod's Torch 2.8
 deploy URL. Add `--minimal` if RunPod reports supply constraints even though
 the UI shows featured GPUs. For `--gpu-type`, use the `gpuId` value from
@@ -1043,6 +1045,9 @@ load and prints the explicit install command.
 | `build-local SOURCE_DIR` | - | Build from a folder of audio files |
 | `build-youtube URL` | - | Download authorized YouTube audio with `yt-dlp` |
 | `qa DATASET_DIR` | - | Run Qwen embedding QA on captions |
+| `separate DATASET_DIR` | - | Separate clips into cached vocals/instrumental/stems |
+| `captions DATASET_DIR` | - | Audit duplicate and low-confidence captions |
+| `export-training-bundle DATASET_DIR` | - | Write `training_bundle.json` for local/cloud training |
 | `--name` | `anvil_dataset` | Dataset name in manifests |
 | `--output-dir` | timestamped `./datasets/...` | Output dataset directory |
 | `--clips` | `40` | Maximum clips to write |
@@ -1063,9 +1068,53 @@ load and prints the explicit install command.
 | `--delete-downloads` | off | Delete raw downloads after clips are written |
 | `--quiet-ytdlp` | off | Pass `--quiet` to `yt-dlp` |
 | `--embedding-model` | local Qwen cache | QA-only embedding model path/repo |
+| `--include-stems` | off | QA-only stem health checks |
 | `--duplicate-threshold` | `0.9` | QA-only duplicate similarity cutoff |
 | `--cluster-threshold` | `0.78` | QA-only cluster similarity cutoff |
 | `--outlier-threshold` | `0.55` | QA-only outlier neighbor cutoff |
+| `--mode` | `instrumental` | Separation mode: `instrumental`, `four-stem`, or `vocals` |
+| `--backend` | `audio-separator` | Separation backend |
+| `--model` | `auto` | Separation model filename |
+| `--force` | off | Recompute cached stems |
+| `--limit` | unlimited | Separation smoke-test limit |
+| `--repair` | off | Caption command repairs weak duplicates |
+| `--write` | off | Caption repair writes files instead of dry-running |
+| `--include` | `full-mix` | Bundle assets: `full-mix`, `vocals`, `instrumental`, `drums`, `bass`, `other` |
+| `--profile` | `acestep-lora` | Training bundle profile |
+| `--strict` | off | Fail bundle export if a requested asset is missing |
+
+---
+
+## `anvil cloud` flags
+
+| Command / Flag | Default | Description |
+| --- | --- | --- |
+| `doctor` | - | Check local `bash`, `ssh`, `rsync`, and `git` availability |
+| `search` | - | Search GPUFindr's public GPU availability catalog |
+| `package TRAINING_BUNDLE` | - | Build a portable SSH training job folder |
+| `run-ssh JOB_DIR` | - | Upload/bootstrap/train/collect on an existing SSH GPU host |
+| `runpod launch JOB_DIR` | - | Create a RunPod pod for a packaged job |
+| `runpod status POD_ID` | - | Show pod status and SSH host/port hints |
+| `runpod terminate POD_ID` | - | Terminate a RunPod pod |
+| `--gpu` | blank | Search GPU name filter, e.g. `h200` |
+| `--source` | blank | Search provider filter, e.g. `runpod` |
+| `--max-price` | unlimited | Search maximum hourly price |
+| `--min-vram-gb` | `0` | Search minimum VRAM |
+| `--output-dir` | required | Cloud package destination |
+| `--primary-asset` | `full-mix` | Training asset copied into the remote dataset |
+| `--model-variant` | `sft` | ACE-Step variant for remote preprocess/train |
+| `--recipe` | `lora-balanced` | Remote LoRA recipe preset |
+| `--max-hours` | `6` | Runtime budget written into `job.json` |
+| `--host` | required | SSH host for `run-ssh`, e.g. `ubuntu@203.0.113.10` |
+| `--port` | `22` | SSH port |
+| `--identity-file` | default SSH config | Optional SSH private key |
+| `--skip-bootstrap` | off | Reuse an already bootstrapped remote job folder |
+| `--no-train` | off | Upload/bootstrap only |
+| `--collect` | off | Sync remote `outputs/` and `logs/` back after training |
+| `--gpu-type` | required | RunPod `gpuId`, e.g. `NVIDIA H200` |
+| `--cloud-type` | `ALL` | RunPod cloud type: `ALL`, `SECURE`, or `COMMUNITY` |
+| `--minimal` | off | Send a UI-like minimal RunPod launch request |
+| `--dry-run` | off | Print cloud/SSH/API commands without spending money |
 
 ---
 
