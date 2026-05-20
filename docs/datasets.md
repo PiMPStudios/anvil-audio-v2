@@ -254,6 +254,22 @@ The package copies the selected assets under `inputs/dataset`, rewrites
 `captions.json` so the selected `--primary-asset` is the training file, and
 writes remote scripts for bootstrap, training, and collection.
 
+For vocal-stem jobs, export a vocals bundle and pass a non-instrumental
+preprocess marker:
+
+```bash
+anvil dataset export-training-bundle ./datasets/my_style_YYYYMMDD_HHMMSS \
+    --include vocals \
+    --output ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle_vocals.json
+
+anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle_vocals.json \
+    --output-dir ./cloud-jobs/my_style_voice_h200 \
+    --primary-asset vocals \
+    --model-variant xl_sft \
+    --recipe lora-balanced \
+    --training-lyrics "vocal stem, expressive vocal performance"
+```
+
 On managed CUDA images, the generated `bootstrap.sh` keeps the image's existing
 PyTorch install by creating a system-site-packages venv. ACE-Step is installed
 after its non-torch training dependencies with dependency resolution disabled,

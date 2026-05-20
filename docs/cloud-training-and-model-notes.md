@@ -163,7 +163,10 @@ cloud-job/
 `anvil cloud package` rewrites `inputs/dataset/captions.json` so the selected
 `--primary-asset` becomes the actual training file. That is what lets a future
 run train against full mixes, instrumental stems, or vocal stems without
-manually editing captions.
+manually editing captions. Instrumental jobs can keep the default
+`--training-lyrics "[Instrumental]"`; vocal-stem jobs should pass a short
+non-instrumental marker such as
+`--training-lyrics "vocal stem, expressive vocal performance"`.
 
 Expected behavior:
 

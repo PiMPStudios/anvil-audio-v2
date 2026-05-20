@@ -386,6 +386,10 @@ captions, and `bootstrap.sh`/`run_training.sh` scripts. Remove `--dry-run` once
 the SSH and `rsync` commands look right. Provider API launchers can be added
 later without changing the job format.
 
+When packaging vocal-stem LoRA jobs, use `--primary-asset vocals` and set
+`--training-lyrics` to a short vocal marker instead of leaving the default
+`[Instrumental]` marker in place.
+
 `anvil cloud search` uses GPUFindr's read-only public GPU catalog to show live
 provider availability and pricing before you create an account somewhere.
 `anvil cloud runpod launch` uses RunPod's GraphQL pod API; keep `--dry-run` on

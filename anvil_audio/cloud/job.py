@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -132,6 +133,7 @@ class CloudJobPackageConfig:
     primary_asset: str = "full-mix"
     max_hours: float = 6.0
     checkpoint_dir: str = "~/.cache/anvil-audio/acestep/checkpoints"
+    training_lyrics: str = "[Instrumental]"
     repo_url: str | None = None
     repo_ref: str | None = None
     force: bool = False
@@ -344,7 +346,7 @@ def _job_payload(
                 _checkpoint_models_for_variant(config.model_variant)
             ),
             "device": "cuda",
-            "lyrics": "[Instrumental]",
+            "lyrics": config.training_lyrics,
             "genre": str(bundle.get("dataset_name") or ""),
             "recipe_args": {
                 "epochs": recipe.epochs,
@@ -517,6 +519,8 @@ def _run_training_script(job: dict[str, Any]) -> str:
     training = job["training"]
     recipe = training["recipe_args"]
     checkpoint_dir = str(training["checkpoint_dir"])
+    lyrics = shlex.quote(str(training.get("lyrics") or ""))
+    genre = shlex.quote(str(training["genre"]))
     target_modules = " ".join(str(item) for item in recipe["target_modules"])
     return f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -544,8 +548,8 @@ anvil lora preprocess "$DATASET_DIR" \\
   --max-duration {recipe["max_duration"]} \\
   --device cuda \\
   --precision {recipe["preprocess_precision"]} \\
-  --lyrics "[Instrumental]" \\
-  --genre "{training["genre"]}" 2>&1 | tee logs/preprocess.log
+  --lyrics {lyrics} \\
+  --genre {genre} 2>&1 | tee logs/preprocess.log
 
 if command -v timeout >/dev/null 2>&1; then
   TIMEOUT_CMD=(timeout "$MAX_SECONDS")

@@ -145,6 +145,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remote ACE-Step checkpoint root.",
     )
     package.add_argument(
+        "--training-lyrics",
+        default="[Instrumental]",
+        help=(
+            "Lyrics marker passed to LoRA preprocessing. Default: [Instrumental]. "
+            "Use an empty string or a short vocal marker for vocal-stem jobs."
+        ),
+    )
+    package.add_argument(
         "--repo-url",
         default=None,
         help="Git URL used by bootstrap.sh. Default: current origin or Anvil repo.",
@@ -352,6 +360,7 @@ def main() -> None:
                     primary_asset=args.primary_asset,
                     max_hours=args.max_hours,
                     checkpoint_dir=args.checkpoint_dir,
+                    training_lyrics=args.training_lyrics,
                     repo_url=args.repo_url,
                     repo_ref=args.repo_ref,
                     force=args.force,

@@ -51,6 +51,7 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert job["primary_asset"] == "instrumental"
     assert job["runtime"]["repo_ref"] == "feature-cloud"
     assert job["training"]["recipe"] == "lora-balanced"
+    assert job["training"]["lyrics"] == "[Instrumental]"
     assert job["training"]["checkpoint_models"] == ["main", "acestep-v15-sft"]
 
     bootstrap = output_dir / "scripts/bootstrap.sh"
@@ -71,6 +72,7 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
         encoding="utf-8"
     )
     assert 'rm -rf "$TENSOR_DIR"' in training_text
+    assert "--lyrics '[Instrumental]'" in training_text
 
     collect_text = (output_dir / "scripts/collect.sh").read_text(
         encoding="utf-8"
@@ -80,6 +82,28 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert "outputs/lora/checkpoints.txt" in collect_text
     assert "tar -czf \"$ARCHIVE\" -C \"$COLLECT_DIR\" ." in collect_text
     assert "tar -czf outputs/anvil_cloud_results.tar.gz job.json" not in collect_text
+
+
+def test_create_cloud_job_package_accepts_custom_training_lyrics(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    output_dir = tmp_path / "jobs" / "voice_job"
+
+    create_cloud_job_package(
+        CloudJobPackageConfig(
+            training_bundle=bundle,
+            output_dir=output_dir,
+            primary_asset="instrumental",
+            training_lyrics="vocal stem, expressive male vocal",
+        )
+    )
+
+    job = json.loads((output_dir / "job.json").read_text(encoding="utf-8"))
+    assert job["training"]["lyrics"] == "vocal stem, expressive male vocal"
+
+    training_text = (output_dir / "scripts/run_training.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "--lyrics 'vocal stem, expressive male vocal'" in training_text
 
 
 def test_create_cloud_job_package_fails_without_primary_assets(tmp_path):

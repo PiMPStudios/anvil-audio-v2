@@ -120,6 +120,7 @@ Command and flag reference for Gradio, generation, datasets, cloud jobs, LoRA, a
 | `--model-variant` | `sft` | ACE-Step variant for remote preprocess/train |
 | `--recipe` | `lora-balanced` | Remote LoRA recipe preset |
 | `--max-hours` | `6` | Runtime budget written into `job.json` |
+| `--training-lyrics` | `[Instrumental]` | Lyrics marker passed to remote LoRA preprocessing |
 | `--host` | required | SSH host for `run-ssh`, e.g. `ubuntu@203.0.113.10` |
 | `--port` | `22` | SSH port |
 | `--identity-file` | default SSH config | Optional SSH private key |
