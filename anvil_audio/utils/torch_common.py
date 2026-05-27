@@ -4,6 +4,8 @@ import random
 import numpy as np
 import torch
 
+from anvil_audio.utils.memory import flush_memory_caches
+
 
 def exists(x: torch.Tensor):
     return x is not None
@@ -22,11 +24,7 @@ def empty_cache(device: torch.device = None):
     """Free unused memory on the given device (or best available)."""
     if device is None:
         device = get_best_device()
-    device_type = str(device).split(":")[0]
-    if device_type == "cuda":
-        torch.cuda.empty_cache()
-    elif device_type == "mps":
-        torch.mps.empty_cache()
+    flush_memory_caches(device=device, include_gc=False, include_mlx=False)
 
 
 def get_world_size():

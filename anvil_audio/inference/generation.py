@@ -89,6 +89,9 @@ def generate_diffusion_uncond(
     else:
         raise RuntimeError(f"No such sampling mode: '{diff_objective}'")
 
+    del noise
+    empty_cache(device if isinstance(device, torch.device) else torch.device(device))
+
     # Decode latents back into audio
 
     if model.pretransform and not return_latents:

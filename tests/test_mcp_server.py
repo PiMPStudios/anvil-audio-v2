@@ -236,6 +236,60 @@ def test_mcp_pipeline_cache_evicts_lru_when_policy_limit_is_reached(monkeypatch)
     ]
 
 
+def test_mcp_memory_pressure_evicts_lru_before_load(monkeypatch):
+    calls = []
+    unloaded = []
+
+    class FakeEntry:
+        pipeline_type = "acestep"
+
+    class FakePipeline:
+        def __init__(self, name):
+            self.name = name
+
+        def unload(self):
+            unloaded.append(self.name)
+
+    def fake_load_pipeline(name, **kwargs):
+        key = (name, kwargs.get("use_mlx_dit"))
+        calls.append(key)
+        return FakePipeline(f"{name}:{kwargs.get('use_mlx_dit')}")
+
+    registry_module = importlib.import_module("anvil_audio.core.registry")
+    old_key = ("acestep-old", False)
+    keep_key = ("acestep-keep", True)
+    monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
+    monkeypatch.setattr(registry_module, "load_pipeline", fake_load_pipeline)
+    monkeypatch.setattr(
+        mcp_server,
+        "_pipeline_cache",
+        {
+            old_key: FakePipeline("old"),
+            keep_key: FakePipeline("keep"),
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_pipeline_last_used",
+        {old_key: 1.0, keep_key: 2.0},
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "cleanup_if_memory_pressure",
+        lambda **_kwargs: {"triggered": True},
+    )
+    monkeypatch.setattr(mcp_server, "_flush_memory_caches", lambda: {"actions": []})
+
+    pipeline = mcp_server._get_pipeline("acestep-new", use_mlx_dit=False)
+
+    assert pipeline.name == "acestep-new:False"
+    assert unloaded == ["old"]
+    assert old_key not in mcp_server._pipeline_cache
+    assert keep_key in mcp_server._pipeline_cache
+    assert ("acestep-new", False) in mcp_server._pipeline_cache
+    assert calls == [("acestep-new", False)]
+
+
 def test_mcp_memory_status_reports_loaded_pipelines(monkeypatch):
     class FakePipeline:
         def lora_status(self):

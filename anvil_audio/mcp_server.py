@@ -27,7 +27,6 @@ except ImportError:
     pass
 
 import argparse
-import gc
 import json
 import os
 import time
@@ -40,6 +39,16 @@ from mcp.server.fastmcp import FastMCP
 
 from anvil_audio.core.registry import registry
 from anvil_audio.core.output import GenerationMetadata, OutputManager
+from anvil_audio.utils.memory import (
+    cleanup_if_memory_pressure,
+    estimate_values_size_mb,
+    flush_memory_caches,
+    memory_pressure_status,
+    mlx_memory_status,
+    process_rss_mb,
+    system_memory_status,
+    torch_memory_status,
+)
 from anvil_audio.utils.stdio_guard import stdout_to_stderr
 
 
@@ -108,6 +117,9 @@ _VALID_BACKEND_LABELS = {"default", "mlx_dit", "torch_dit"}
 _DEFAULT_MAX_PIPELINES = 2
 _MAX_PIPELINES_ENV = "ANVIL_MCP_MAX_PIPELINES"
 _IDLE_TIMEOUT_ENV = "ANVIL_MCP_IDLE_TIMEOUT_SECONDS"
+_MEMORY_ENV_PREFIX = "ANVIL_MCP_MEMORY"
+_LARGE_OUTPUT_CLEANUP_MB_ENV = "ANVIL_MCP_LARGE_OUTPUT_CLEANUP_MB"
+_DEFAULT_LARGE_OUTPUT_CLEANUP_MB = 128.0
 
 
 # ---------------------------------------------------------------------------
@@ -224,137 +236,80 @@ def _touch_pipeline_cache_key(key: tuple[str, bool | None]) -> None:
 
 def _flush_memory_caches() -> dict[str, Any]:
     """Best-effort Python, torch, and MLX cache cleanup."""
-    actions: list[str] = []
-    collected = gc.collect()
-
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            actions.append("torch.cuda.empty_cache")
-            try:
-                torch.cuda.synchronize()
-                actions.append("torch.cuda.synchronize")
-            except RuntimeError:
-                pass
-        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
-            torch.mps.empty_cache()
-            actions.append("torch.mps.empty_cache")
-            synchronize = getattr(torch.mps, "synchronize", None)
-            if callable(synchronize):
-                synchronize()
-                actions.append("torch.mps.synchronize")
-    except Exception as exc:
-        actions.append(f"torch cleanup skipped: {exc}")
-
-    try:
-        import mlx.core as mx
-
-        clear_cache = getattr(mx, "clear_cache", None)
-        if callable(clear_cache):
-            clear_cache()
-            actions.append("mlx.clear_cache")
-        metal = getattr(mx, "metal", None)
-        metal_clear_cache = getattr(metal, "clear_cache", None)
-        if callable(metal_clear_cache):
-            metal_clear_cache()
-            actions.append("mlx.metal.clear_cache")
-    except Exception as exc:
-        actions.append(f"mlx cleanup skipped: {exc}")
-
-    return {"gc_collected": collected, "actions": actions}
+    return flush_memory_caches()
 
 
 def _process_rss_mb() -> float | None:
     """Return current process RSS in MB when it can be measured cheaply."""
-    try:
-        import psutil
-
-        return psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
-    except Exception:
-        pass
-
-    try:
-        import subprocess
-
-        raw = subprocess.check_output(
-            ["ps", "-o", "rss=", "-p", str(os.getpid())],
-            text=True,
-        ).strip()
-        return int(raw) / 1024 if raw else None
-    except Exception:
-        return None
+    return process_rss_mb()
 
 
 def _system_memory_status() -> dict[str, Any]:
     """Return system memory details when psutil is installed."""
-    try:
-        import psutil
-
-        vm = psutil.virtual_memory()
-        return {
-            "total_gb": round(vm.total / (1024**3), 2),
-            "available_gb": round(vm.available / (1024**3), 2),
-            "used_percent": vm.percent,
-        }
-    except Exception as exc:
-        return {"available": False, "error": str(exc)}
+    return system_memory_status()
 
 
 def _torch_memory_status() -> dict[str, Any]:
     """Return accelerator memory stats exposed by torch."""
-    status: dict[str, Any] = {}
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            status["cuda"] = {
-                "allocated_mb": round(torch.cuda.memory_allocated() / (1024**2), 2),
-                "reserved_mb": round(torch.cuda.memory_reserved() / (1024**2), 2),
-                "peak_allocated_mb": round(
-                    torch.cuda.max_memory_allocated() / (1024**2), 2
-                ),
-            }
-
-        mps_stats: dict[str, Any] = {}
-        mps = getattr(torch, "mps", None)
-        for name in (
-            "current_allocated_memory",
-            "driver_allocated_memory",
-            "recommended_max_memory",
-        ):
-            fn = getattr(mps, name, None)
-            if callable(fn):
-                try:
-                    mps_stats[f"{name}_mb"] = round(fn() / (1024**2), 2)
-                except Exception:
-                    pass
-        if mps_stats:
-            status["mps"] = mps_stats
-    except Exception as exc:
-        status["error"] = str(exc)
-    return status
+    return torch_memory_status()
 
 
 def _mlx_memory_status() -> dict[str, Any]:
     """Return MLX memory stats when MLX is importable."""
-    try:
-        import mlx.core as mx
-    except Exception as exc:
-        return {"available": False, "error": str(exc)}
+    return mlx_memory_status()
 
-    status: dict[str, Any] = {"available": True}
-    for name in ("get_active_memory", "get_cache_memory", "get_peak_memory"):
-        fn = getattr(mx, name, None)
-        if callable(fn):
-            try:
-                status[f"{name.removeprefix('get_')}_mb"] = round(
-                    fn() / (1024**2), 2
-                )
-            except Exception:
-                pass
-    return status
+
+def _large_output_cleanup_threshold_mb() -> float:
+    return _env_float(
+        _LARGE_OUTPUT_CLEANUP_MB_ENV,
+        _DEFAULT_LARGE_OUTPUT_CLEANUP_MB,
+    )
+
+
+def _relieve_memory_pressure(
+    *,
+    protected_key: tuple[str, bool | None] | None = None,
+    reason: str,
+) -> dict[str, Any]:
+    """Flush caches and evict one old pipeline when memory pressure is configured."""
+    pressure_cleanup = cleanup_if_memory_pressure(
+        reason=reason,
+        env_prefix=_MEMORY_ENV_PREFIX,
+    )
+    evicted: list[dict[str, Any]] = []
+    if not pressure_cleanup["triggered"]:
+        return {"pressure_cleanup": pressure_cleanup, "evicted": evicted}
+
+    candidates = [key for key in _pipeline_cache if key != protected_key]
+    if candidates:
+        lru_key = min(candidates, key=lambda key: _pipeline_last_used.get(key, 0.0))
+        item = _evict_pipeline_key(lru_key, reason="memory_pressure")
+        if item is not None:
+            evicted.append(item)
+            pressure_cleanup["post_evict_flush"] = _flush_memory_caches()
+
+    return {"pressure_cleanup": pressure_cleanup, "evicted": evicted}
+
+
+def _post_generation_cleanup(
+    *,
+    output_mb: float,
+    protected_key: tuple[str, bool | None] | None,
+) -> None:
+    """Clean up after a generation call without unloading the current pipeline."""
+    threshold_mb = _large_output_cleanup_threshold_mb()
+    if threshold_mb > 0 and output_mb >= threshold_mb:
+        _flush_memory_caches()
+
+    pressure_result = _relieve_memory_pressure(
+        protected_key=protected_key,
+        reason="mcp.post_generation",
+    )
+    for item in pressure_result["evicted"]:
+        _log(
+            "Evicted cached model under memory pressure: "
+            f"{item['model']} ({item['backend']})"
+        )
 
 
 def _pipeline_lora_status(pipeline: Any) -> dict[str, Any]:
@@ -488,6 +443,16 @@ def _get_pipeline(model_name: str, *, use_mlx_dit: bool | None = None) -> Any:
         model_name,
         use_mlx_dit if entry is not None and entry.pipeline_type == "acestep" else None,
     )
+    pressure_result = _relieve_memory_pressure(
+        protected_key=cache_key,
+        reason="mcp.before_pipeline_load",
+    )
+    for item in pressure_result["evicted"]:
+        _log(
+            "Evicted cached model under memory pressure: "
+            f"{item['model']} ({item['backend']})"
+        )
+
     evicted = _enforce_pipeline_cache_policy(incoming_key=cache_key)
     for item in evicted:
         _log(
@@ -578,6 +543,7 @@ def _run_generate(
         effective_use_mlx_dit = False
 
     pipeline = _get_pipeline(model_name, use_mlx_dit=effective_use_mlx_dit)
+    current_key = (model_name, effective_use_mlx_dit if is_acestep else None)
 
     effective_steps = steps if steps is not None else params.get("steps", 100)
     effective_cfg = cfg_scale if cfg_scale is not None else params.get("cfg_scale", 7.0)
@@ -648,54 +614,64 @@ def _run_generate(
                 }
             ]
 
-    # Samplers may print progress to stdout; redirect so MCP stdio is clean.
-    _gen_t0 = time.perf_counter()
-    with stdout_to_stderr():
-        result = pipeline.generate(
-            conditioning,
-            steps=effective_steps,
+    result: Any | None = None
+    audio: Any | None = None
+    output_mb = 0.0
+    try:
+        # Samplers may print progress to stdout; redirect so MCP stdio is clean.
+        _gen_t0 = time.perf_counter()
+        with stdout_to_stderr():
+            result = pipeline.generate(
+                conditioning,
+                steps=effective_steps,
+                seed=effective_seed,
+                disable_tqdm=True,
+                **gen_kwargs,
+            )  # [B, C, T]
+        gen_duration = round(time.perf_counter() - _gen_t0, 3)
+
+        audio = result[0]  # [C, T]
+        sr = pipeline.sample_rate
+        length = int(sr * duration)
+        audio = audio[:, :length]
+        output_mb = estimate_values_size_mb(result, audio)
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if is_acestep and lyrics:
+            extra["lyrics"] = lyrics
+
+        meta = GenerationMetadata(
+            prompt=prompt,
+            model_name=model_name,
             seed=effective_seed,
-            disable_tqdm=True,
-            **gen_kwargs,
-        )  # [B, C, T]
-    gen_duration = round(time.perf_counter() - _gen_t0, 3)
+            steps=effective_steps,
+            cfg_scale=float(effective_cfg),
+            sampler_type=params.get(
+                "sampler_type", "ode" if is_acestep else "dpmpp-3m-sde"
+            ),
+            sigma_min=float(params.get("sigma_min", 0.0)),
+            sigma_max=float(params.get("sigma_max", 0.0)),
+            duration_seconds=audio.shape[-1] / sr,
+            timestamp=ts,
+            negative_prompt=negative_prompt or "",
+            generation_duration_seconds=gen_duration,
+            extra=extra,
+        )
 
-    audio = result[0]  # [C, T]
-    sr = pipeline.sample_rate
-    length = int(sr * duration)
-    audio = audio[:, :length]
+        output_manager = OutputManager(project=_resolve_project(project))
+        path, sidecar = output_manager.save_audio(audio.cpu(), meta, sr, ext=fmt)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if is_acestep and lyrics:
-        extra["lyrics"] = lyrics
-
-    meta = GenerationMetadata(
-        prompt=prompt,
-        model_name=model_name,
-        seed=effective_seed,
-        steps=effective_steps,
-        cfg_scale=float(effective_cfg),
-        sampler_type=params.get(
-            "sampler_type", "ode" if is_acestep else "dpmpp-3m-sde"
-        ),
-        sigma_min=float(params.get("sigma_min", 0.0)),
-        sigma_max=float(params.get("sigma_max", 0.0)),
-        duration_seconds=audio.shape[-1] / sr,
-        timestamp=ts,
-        negative_prompt=negative_prompt or "",
-        generation_duration_seconds=gen_duration,
-        extra=extra,
-    )
-
-    output_manager = OutputManager(project=_resolve_project(project))
-    path, sidecar = output_manager.save_audio(audio.cpu(), meta, sr, ext=fmt)
-
-    return {
-        "path": str(path),
-        "sidecar_path": str(sidecar),
-        "generation_duration_seconds": gen_duration,
-        "metadata": meta.to_dict(),
-    }
+        return {
+            "path": str(path),
+            "sidecar_path": str(sidecar),
+            "generation_duration_seconds": gen_duration,
+            "metadata": meta.to_dict(),
+        }
+    finally:
+        output_mb = max(output_mb, estimate_values_size_mb(result, audio))
+        del audio
+        del result
+        _post_generation_cleanup(output_mb=output_mb, protected_key=current_key)
 
 
 # ---------------------------------------------------------------------------
@@ -1153,6 +1129,7 @@ def get_memory_status(flush: bool = False) -> dict[str, Any]:
         "system_memory": _system_memory_status(),
         "torch_memory": _torch_memory_status(),
         "mlx_memory": _mlx_memory_status(),
+        "memory_pressure": memory_pressure_status(env_prefix=_MEMORY_ENV_PREFIX),
         "cache_policy": _pipeline_cache_policy(),
         "loaded_pipelines": _loaded_pipeline_summary(),
         "flush": flush_result,
@@ -1214,6 +1191,7 @@ def unload_models(
             "system_memory": _system_memory_status(),
             "torch_memory": _torch_memory_status(),
             "mlx_memory": _mlx_memory_status(),
+            "memory_pressure": memory_pressure_status(env_prefix=_MEMORY_ENV_PREFIX),
         },
         "flush": flush_result,
     }

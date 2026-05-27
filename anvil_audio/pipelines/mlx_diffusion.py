@@ -64,7 +64,6 @@ Usage
 
 from __future__ import annotations
 
-import gc
 import platform
 import sys
 from pathlib import Path
@@ -76,6 +75,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from anvil_audio.core.interfaces import BasePipeline
+from anvil_audio.utils.memory import flush_memory_caches
 from anvil_audio.utils.stdio_guard import stdout_to_stderr
 
 # Files that must exist in a converted weights directory.
@@ -447,6 +447,14 @@ class MLXDiffusionPipeline(BasePipeline):
                 .float()
             )
             audio_tensors.append(audio_t)
+            del audio_mx
+            del audio_np
+            del audio_t
+            flush_memory_caches(
+                include_gc=False,
+                include_torch=False,
+                include_mlx=True,
+            )
 
         # Pad shorter clips to the batch maximum length, then stack → [B, C, T]
         max_len = max(t.shape[-1] for t in audio_tensors)
@@ -454,7 +462,11 @@ class MLXDiffusionPipeline(BasePipeline):
             F.pad(t, (0, max_len - t.shape[-1])) if t.shape[-1] < max_len else t
             for t in audio_tensors
         ]
-        return torch.stack(padded)
+        stacked = torch.stack(padded)
+        del padded
+        del audio_tensors
+        flush_memory_caches(include_gc=False)
+        return stacked
 
     def to(self, device: str | torch.device) -> "MLXDiffusionPipeline":
         """No-op: MLX always runs on the Metal GPU on Apple Silicon.
@@ -467,19 +479,7 @@ class MLXDiffusionPipeline(BasePipeline):
     def unload(self) -> None:
         """Drop MLX model references before cache eviction."""
         self._pipe = None
-        gc.collect()
-        try:
-            import mlx.core as mx
-
-            clear_cache = getattr(mx, "clear_cache", None)
-            if callable(clear_cache):
-                clear_cache()
-            metal = getattr(mx, "metal", None)
-            metal_clear_cache = getattr(metal, "clear_cache", None)
-            if callable(metal_clear_cache):
-                metal_clear_cache()
-        except Exception:
-            pass
+        flush_memory_caches()
 
     # ------------------------------------------------------------------
     # Convenience helpers

@@ -30,6 +30,7 @@ import torch
 from torch import Tensor
 
 from .interfaces import BaseCompressor, BaseConditioner, BaseGenerator, BasePipeline
+from anvil_audio.utils.memory import flush_memory_caches
 from anvil_audio.utils.torch_common import get_best_device
 
 if TYPE_CHECKING:
@@ -396,6 +397,11 @@ class DiffusionPipeline(BasePipeline):
         self._device = torch.device(device)
         self._model.to(self._device)
         return self
+
+    def unload(self) -> None:
+        """Drop the wrapped torch model before cache eviction."""
+        self._model = None  # type: ignore[assignment]
+        flush_memory_caches()
 
     # ------------------------------------------------------------------
     # Optional component accessors

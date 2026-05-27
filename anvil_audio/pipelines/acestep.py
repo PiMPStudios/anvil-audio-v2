@@ -63,6 +63,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from anvil_audio.core.interfaces import BasePipeline
+from anvil_audio.utils.memory import flush_memory_caches
 from anvil_audio.utils.stdio_guard import stdout_to_stderr
 
 _XL_CHECKPOINT_PREFIX = "acestep-v15-xl-"
@@ -683,7 +684,12 @@ class ACEStepPipeline(BasePipeline):
                 # Mono: unsqueeze to [1, T]
                 audio_t = audio_t.unsqueeze(0)
 
-            audio_tensors.append(audio_t.cpu())
+            audio_cpu = audio_t.cpu()
+            audio_tensors.append(audio_cpu)
+            del audio_t
+            del audio_cpu
+            del audios
+            del result
 
         # Pad shorter clips to the batch maximum length, then stack → [B, C, T]
         max_len = max(t.shape[-1] for t in audio_tensors)
@@ -691,7 +697,11 @@ class ACEStepPipeline(BasePipeline):
             F.pad(t, (0, max_len - t.shape[-1])) if t.shape[-1] < max_len else t
             for t in audio_tensors
         ]
-        return torch.stack(padded)
+        stacked = torch.stack(padded)
+        del padded
+        del audio_tensors
+        flush_memory_caches(include_gc=False)
+        return stacked
 
     def apply_lora_adapter(
         self,
@@ -805,6 +815,7 @@ class ACEStepPipeline(BasePipeline):
                     except Exception:
                         pass
         self._handler = None
+        flush_memory_caches()
 
     def to(self, device: str | torch.device) -> "ACEStepPipeline":
         """No-op: ACE-Step initialises its device at construction time.

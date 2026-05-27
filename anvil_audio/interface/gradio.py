@@ -22,8 +22,8 @@ Module-level state
 
 from __future__ import annotations
 
-import gc
 import json
+import os
 import warnings
 from pathlib import Path
 from typing import Any
@@ -41,7 +41,12 @@ from ..models.pretrained import get_pretrained_model
 from ..models.utils import load_ckpt_state_dict
 from ..training.viz import audio_spectrogram_image
 from ..utils.audio_utils import float_to_int16_audio
-from ..utils.torch_common import copy_state_dict, empty_cache, exists, get_best_device
+from ..utils.memory import (
+    cleanup_if_memory_pressure,
+    estimate_values_size_mb,
+    flush_memory_caches,
+)
+from ..utils.torch_common import copy_state_dict, exists, get_best_device
 
 # ---------------------------------------------------------------------------
 # Module-level state
@@ -72,6 +77,9 @@ _THEME_HUB_REPOS = {
     "minecraft": "YTheme/Minecraft",
     "sketch": "gstaff/sketch",
 }
+_MEMORY_ENV_PREFIX = "ANVIL_GRADIO_MEMORY"
+_LARGE_OUTPUT_CLEANUP_MB_ENV = "ANVIL_GRADIO_LARGE_OUTPUT_CLEANUP_MB"
+_DEFAULT_LARGE_OUTPUT_CLEANUP_MB = 128.0
 _THEME_PRESETS: tuple[tuple[str, str, str], ...] = (
     (_THEME_DEFAULT_VALUE, "Anvil Default", "Use Gradio's standard theme controls."),
     ("ocean", "Ocean", "Emerald and blue, clean and spacious."),
@@ -120,6 +128,31 @@ def _get_pipeline() -> DiffusionPipeline:
     if _pipeline is None:
         raise RuntimeError("No model loaded.  Call load_model() first.")
     return _pipeline
+
+
+def _large_output_cleanup_threshold_mb() -> float:
+    raw = os.environ.get(_LARGE_OUTPUT_CLEANUP_MB_ENV)
+    if raw is None or raw.strip() == "":
+        return _DEFAULT_LARGE_OUTPUT_CLEANUP_MB
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return _DEFAULT_LARGE_OUTPUT_CLEANUP_MB
+
+
+def _cleanup_before_generation() -> None:
+    flush_memory_caches()
+
+
+def _cleanup_after_generation(output_mb: float = 0.0) -> None:
+    threshold_mb = _large_output_cleanup_threshold_mb()
+    if threshold_mb > 0 and output_mb >= threshold_mb:
+        flush_memory_caches()
+        return
+    cleanup_if_memory_pressure(
+        reason="gradio.post_generation",
+        env_prefix=_MEMORY_ENV_PREFIX,
+    )
 
 
 def _theme_cache_root() -> Path:
@@ -510,8 +543,7 @@ def generate_cond(
         return None, [], None  # type: ignore[return-value]
 
     pipeline = _get_pipeline()
-    empty_cache()
-    gc.collect()
+    _cleanup_before_generation()
 
     print("=== Conditional generation ===")
     print(f"\tPrompt: {prompt}")
@@ -665,6 +697,12 @@ def generate_cond(
     )
 
     spectrogram = audio_spectrogram_image(audio_int16.cpu(), sample_rate=sample_rate)
+    output_mb = estimate_values_size_mb(audio, audio_item, audio_int16, init_audio_tensor)
+    del audio
+    del audio_item
+    del audio_int16
+    del init_audio_tensor
+    _cleanup_after_generation(output_mb)
     return str(path), [spectrogram, *preview_images], meta.to_dict()
 
 
@@ -687,8 +725,7 @@ def generate_uncond(
     project: str = "",
 ) -> tuple[str, list[Any]]:
     pipeline = _get_pipeline()
-    empty_cache()
-    gc.collect()
+    _cleanup_before_generation()
 
     init_audio_tensor = _prepare_init_audio(init_audio, use_init)
     input_sample_size = sample_size
@@ -773,6 +810,12 @@ def generate_uncond(
     path, _ = output_manager.save_audio(audio_out.cpu(), meta, sample_rate)
 
     spectrogram = audio_spectrogram_image(audio_int16, sample_rate=sample_rate)
+    output_mb = estimate_values_size_mb(audio, audio_out, audio_int16, init_audio_tensor)
+    del audio
+    del audio_out
+    del audio_int16
+    del init_audio_tensor
+    _cleanup_after_generation(output_mb)
     return str(path), [spectrogram, *preview_images]
 
 
@@ -789,8 +832,7 @@ def generate_lm(
     project: str = "",
 ) -> tuple[str, list[Any]]:
     pipeline = _get_pipeline()
-    empty_cache()
-    gc.collect()
+    _cleanup_before_generation()
 
     audio = pipeline._model.generate_audio(
         batch_size=batch_size,
@@ -828,6 +870,11 @@ def generate_lm(
     path, _ = output_manager.save_audio(audio_out.cpu(), meta, sample_rate)
 
     spectrogram = audio_spectrogram_image(audio_int16, sample_rate=sample_rate)
+    output_mb = estimate_values_size_mb(audio, audio_out, audio_int16)
+    del audio
+    del audio_out
+    del audio_int16
+    _cleanup_after_generation(output_mb)
     return str(path), [spectrogram]
 
 
@@ -871,8 +918,7 @@ def generate_acestep(
     from datetime import datetime
 
     pipeline = _get_pipeline()
-    empty_cache()
-    gc.collect()
+    _cleanup_before_generation()
 
     print("=== ACE-Step generation ===")
     print(f"\tPrompt (tags): {prompt}")
@@ -957,6 +1003,11 @@ def generate_acestep(
     )
 
     spectrogram = audio_spectrogram_image(audio_int16.cpu(), sample_rate=sample_rate)
+    output_mb = estimate_values_size_mb(audio, audio_item, audio_int16)
+    del audio
+    del audio_item
+    del audio_int16
+    _cleanup_after_generation(output_mb)
     return str(path), [spectrogram], meta.to_dict()
 
 
@@ -1040,8 +1091,7 @@ def autoencoder_process(
 ) -> str:
     pipeline = _get_pipeline()
     model = pipeline._model
-    empty_cache()
-    gc.collect()
+    _cleanup_before_generation()
 
     device = pipeline._device
     dtype = next(model.parameters()).dtype
@@ -1084,6 +1134,12 @@ def autoencoder_process(
         timestamp=__import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
     path, _ = output_manager.save_audio(audio_out.cpu(), meta, sample_rate)
+    output_mb = estimate_values_size_mb(audio_t, latents, audio_out, audio_int16)
+    del audio_t
+    del latents
+    del audio_out
+    del audio_int16
+    _cleanup_after_generation(output_mb)
     return str(path)
 
 
@@ -1097,8 +1153,7 @@ def diffusion_prior_process(
 ) -> str:
     pipeline = _get_pipeline()
     model = pipeline._model
-    empty_cache()
-    gc.collect()
+    _cleanup_before_generation()
 
     device = pipeline._device
     in_sr, audio_np = audio
@@ -1143,6 +1198,11 @@ def diffusion_prior_process(
         timestamp=__import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
     path, _ = output_manager.save_audio(audio_out.cpu(), meta, sample_rate)
+    output_mb = estimate_values_size_mb(audio_t, audio_out, audio_int16)
+    del audio_t
+    del audio_out
+    del audio_int16
+    _cleanup_after_generation(output_mb)
     return str(path)
 
 

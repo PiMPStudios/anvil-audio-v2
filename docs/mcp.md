@@ -77,6 +77,24 @@ count if your machine has more headroom. You can also set
 while. ACE-Step keeps separate cached instances for the default, MLX DiT, and
 PyTorch DiT backend variants when those variants are requested.
 
+After large generations, MCP clears unused Python, torch, and MLX caches before
+returning the result. The default large-output threshold is `128` MB; adjust it
+with `ANVIL_MCP_LARGE_OUTPUT_CLEANUP_MB`, or set it to `0` to disable that
+post-generation cleanup trigger. You can also opt into pressure-based cleanup
+and one-model LRU eviction with these thresholds:
+
+```bash
+ANVIL_MCP_MEMORY_RSS_LIMIT_MB=24576
+ANVIL_MCP_MEMORY_SYSTEM_AVAILABLE_LIMIT_MB=2048
+ANVIL_MCP_MEMORY_SYSTEM_USED_PERCENT_LIMIT=92
+ANVIL_MCP_MEMORY_MPS_LIMIT_RATIO=0.90
+ANVIL_MCP_MEMORY_CUDA_RESERVED_RATIO=0.90
+```
+
+Unset or `0` values disable the corresponding pressure check. When a configured
+threshold trips, MCP flushes unused caches and evicts the least-recently-used
+cached pipeline other than the model currently being loaded or used.
+
 If an ACE-Step pipeline has a LoRA loaded, a later MCP generation with no
 `lora` argument explicitly disables the active adapter before generating. This
 keeps A/B tests honest when comparing a tuned adapter against the base model.

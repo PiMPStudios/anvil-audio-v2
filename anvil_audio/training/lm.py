@@ -1,5 +1,4 @@
 
-import gc
 import typing as tp
 
 import torch
@@ -13,6 +12,7 @@ from safetensors.torch import save_file
 import wandb
 
 from anvil_audio.utils.audio_utils import float_to_int16_audio
+from anvil_audio.utils.memory import flush_memory_caches
 from ..models.lm import AudioLanguageModelWrapper
 from .scheduler import create_optimizer_from_config, create_scheduler_from_config
 from .viz import audio_spectrogram_image
@@ -261,6 +261,5 @@ class AudioLanguageModelDemoCallback(pl.Callback):
         except Exception as e:
             raise e
         finally:
-            gc.collect()
-            torch.cuda.empty_cache()
+            flush_memory_caches()
             module.train()

@@ -1,6 +1,5 @@
 
 import os
-import gc
 import random
 import typing as tp
 import warnings
@@ -18,6 +17,7 @@ from torch.nn import functional as F
 import wandb
 
 from anvil_audio.utils.audio_utils import float_to_int16_audio
+from anvil_audio.utils.memory import flush_memory_caches
 from ..inference.sampling import get_alphas_sigmas, sample, sample_discrete_euler
 from ..models.diffusion import DiffusionModelWrapper, ConditionedDiffusionModelWrapper
 from ..models.autoencoders import DiffusionAutoencoder
@@ -212,8 +212,7 @@ class DiffusionUncondDemoCallback(pl.Callback):
         except Exception as e:
             print(f'{type(e).__name__}: {e}')
         finally:
-            gc.collect()
-            torch.cuda.empty_cache()
+            flush_memory_caches()
 
 
 class DiffusionCondTrainingWrapper(pl.LightningModule):
@@ -589,8 +588,7 @@ class DiffusionCondDemoCallback(pl.Callback):
         except Exception as e:
             raise e
         finally:
-            gc.collect()
-            torch.cuda.empty_cache()
+            flush_memory_caches()
             module.train()
 
 

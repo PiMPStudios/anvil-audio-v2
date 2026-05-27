@@ -4,12 +4,11 @@ import logging
 import warnings
 import string
 import typing as tp
-import gc
 
 import torch
 from torch import nn
 
-from ..utils.torch_common import empty_cache
+from ..utils.memory import flush_memory_caches
 
 from .adp import NumberEmbedder
 from ..inference.utils import set_audio_channels
@@ -153,8 +152,7 @@ class CLAPTextConditioner(Conditioner):
 
         del self.model.model.audio_branch
 
-        gc.collect()
-        empty_cache()
+        flush_memory_caches()
 
     def set_device(self, device):
         self.to(device)
@@ -237,8 +235,7 @@ class CLAPAudioConditioner(Conditioner):
 
         del self.model.model.text_branch
 
-        gc.collect()
-        empty_cache()
+        flush_memory_caches()
 
     def set_device(self, device):
         self.to(device)
