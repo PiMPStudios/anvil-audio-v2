@@ -95,9 +95,9 @@ def load_peft_lora_adapter(
 ) -> MLXLoRAAdapter:
     """Load and normalize a PEFT LoRA adapter without importing PEFT or torch.
 
-    ``adapter_model.safetensors`` is preferred so the bridge can remain cheap
-    and CPU-light.  ``adapter_model.bin`` is accepted as a fallback because some
-    older PEFT exports use it.
+    ``adapter_model.safetensors`` is preferred.  NumPy loading handles fp32/fp16
+    cheaply; bf16 adapters fall back to torch because NumPy has no native
+    bfloat16 dtype.  ``adapter_model.bin`` is accepted for older PEFT exports.
     """
     path = Path(adapter_path).expanduser().resolve()
     if not path.is_dir():
@@ -305,7 +305,12 @@ def _load_peft_weights(path: Path) -> Mapping[str, Any]:
             raise RuntimeError(
                 "safetensors is required to load PEFT LoRA safetensors for MLX."
             ) from exc
-        return load_file(str(safetensors_path))
+        try:
+            return load_file(str(safetensors_path))
+        except TypeError as exc:
+            if "bfloat16" not in str(exc):
+                raise
+            return _load_torch_safetensors(safetensors_path)
 
     bin_path = path / "adapter_model.bin"
     if bin_path.is_file():
@@ -322,6 +327,16 @@ def _load_peft_weights(path: Path) -> Mapping[str, Any]:
         f"Missing PEFT adapter weights in {path} "
         f"(expected one of {', '.join(_PEFT_WEIGHT_FILES)})"
     )
+
+
+def _load_torch_safetensors(path: Path) -> Mapping[str, Any]:
+    try:
+        from safetensors.torch import load_file
+    except ImportError as exc:
+        raise RuntimeError(
+            "safetensors.torch is required to load bf16 PEFT LoRA safetensors."
+        ) from exc
+    return load_file(str(path), device="cpu")
 
 
 def _module_alpha(config: Mapping[str, Any], module_path: str, *, default: float) -> float:
@@ -350,7 +365,15 @@ def _as_numpy(value: Any) -> np.ndarray:
         value = cpu()
     numpy = getattr(value, "numpy", None)
     if callable(numpy):
-        return np.asarray(numpy())
+        try:
+            return np.asarray(numpy())
+        except TypeError as exc:
+            if "BFloat16" not in str(exc) and "bfloat16" not in str(exc):
+                raise
+            to_float = getattr(value, "float", None)
+            if not callable(to_float):
+                raise
+            return np.asarray(to_float().numpy())
     return np.asarray(value)
 
 
