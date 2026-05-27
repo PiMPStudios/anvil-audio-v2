@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 from pathlib import Path
 from typing import Any
@@ -275,6 +276,81 @@ def _refresh_lora_dropdown(current_value: str | None = None) -> Any:
     if value and value not in values:
         return gr.update(choices=choices, value=value)
     return gr.update(choices=choices, value=value if value in values else "")
+
+
+def _refresh_lora_dropdowns(*current_values: str | None) -> tuple[Any, ...]:
+    """Refresh several LoRA pickers from the same registry snapshot."""
+    import gradio as gr
+
+    choices = _lora_dropdown_choices()
+    values = {value for _label, value in choices}
+    updates = []
+    for current_value in current_values:
+        value = (current_value or "").strip()
+        if value and value not in values:
+            updates.append(gr.update(choices=choices, value=value))
+        else:
+            updates.append(
+                gr.update(choices=choices, value=value if value in values else "")
+            )
+    return tuple(updates)
+
+
+def _build_lora_stack_specs(
+    lora_stack: str = "",
+    lora_stack_reference_1: str = "",
+    lora_stack_scale_1: float = 1.0,
+    lora_stack_reference_2: str = "",
+    lora_stack_scale_2: float = 1.0,
+    lora_stack_reference_3: str = "",
+    lora_stack_scale_3: float = 1.0,
+) -> list[str | dict[str, Any]]:
+    """Combine legacy text stack specs with structured Gradio stack rows."""
+    specs: list[str | dict[str, Any]] = [
+        part.strip()
+        for part in re.split(r"[\n,]+", lora_stack or "")
+        if part and part.strip()
+    ]
+    structured_specs = (
+        (lora_stack_reference_1, lora_stack_scale_1),
+        (lora_stack_reference_2, lora_stack_scale_2),
+        (lora_stack_reference_3, lora_stack_scale_3),
+    )
+    for reference, scale in structured_specs:
+        resolved_reference = str(reference or "").strip()
+        if not resolved_reference:
+            continue
+        try:
+            resolved_scale = float(scale)
+        except (TypeError, ValueError):
+            resolved_scale = 1.0
+        specs.append({"reference": resolved_reference, "scale": resolved_scale})
+    return specs
+
+
+def _create_lora_stack_controls(gr: Any) -> tuple[Any, Any, Any, Any, Any, Any]:
+    """Create structured Gradio controls for additional ACE-Step LoRAs."""
+    choices = _lora_dropdown_choices()
+    components: list[Any] = []
+    for index in range(1, 4):
+        with gr.Row():
+            reference = gr.Dropdown(
+                choices=choices,
+                value="",
+                label=f"Stack adapter {index}",
+                allow_custom_value=True,
+                filterable=True,
+                scale=3,
+            )
+            scale = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                step=0.05,
+                value=1.0,
+                label=f"Scale {index}",
+            )
+        components.extend([reference, scale])
+    return tuple(components)  # type: ignore[return-value]
 
 
 def _theme_markdown(value: str) -> str:
@@ -697,7 +773,9 @@ def generate_cond(
     )
 
     spectrogram = audio_spectrogram_image(audio_int16.cpu(), sample_rate=sample_rate)
-    output_mb = estimate_values_size_mb(audio, audio_item, audio_int16, init_audio_tensor)
+    output_mb = estimate_values_size_mb(
+        audio, audio_item, audio_int16, init_audio_tensor
+    )
     del audio
     del audio_item
     del audio_int16
@@ -810,7 +888,9 @@ def generate_uncond(
     path, _ = output_manager.save_audio(audio_out.cpu(), meta, sample_rate)
 
     spectrogram = audio_spectrogram_image(audio_int16, sample_rate=sample_rate)
-    output_mb = estimate_values_size_mb(audio, audio_out, audio_int16, init_audio_tensor)
+    output_mb = estimate_values_size_mb(
+        audio, audio_out, audio_int16, init_audio_tensor
+    )
     del audio
     del audio_out
     del audio_int16
@@ -896,6 +976,12 @@ def generate_acestep(
     lora_reference: str = "",
     lora_scale: float = 1.0,
     lora_stack: str = "",
+    lora_stack_reference_1: str = "",
+    lora_stack_scale_1: float = 1.0,
+    lora_stack_reference_2: str = "",
+    lora_stack_scale_2: float = 1.0,
+    lora_stack_reference_3: str = "",
+    lora_stack_scale_3: float = 1.0,
 ) -> tuple[str, list[Any], dict[str, Any]]:
     """Generate music with ACE-Step.
 
@@ -913,6 +999,12 @@ def generate_acestep(
         lora_reference: Optional registered adapter id/name or direct path.
         lora_scale:     LoRA strength from 0.0 to 1.0.
         lora_stack:     Additional comma/newline stack entries as adapter[:scale].
+        lora_stack_reference_1: First structured stack adapter id/name/path.
+        lora_stack_scale_1:     First structured stack adapter strength.
+        lora_stack_reference_2: Second structured stack adapter id/name/path.
+        lora_stack_scale_2:     Second structured stack adapter strength.
+        lora_stack_reference_3: Third structured stack adapter id/name/path.
+        lora_stack_scale_3:     Third structured stack adapter strength.
 
     Returns:
         ``(wav_path, [spectrogram_image], metadata_dict)``
@@ -928,13 +1020,22 @@ def generate_acestep(
     if negative_prompt:
         print(f"\tNegative prompt: {negative_prompt}")
     lora_metadata: dict[str, Any] = {}
-    if (lora_reference and lora_reference.strip()) or (lora_stack and lora_stack.strip()):
+    lora_stack_specs = _build_lora_stack_specs(
+        lora_stack,
+        lora_stack_reference_1,
+        lora_stack_scale_1,
+        lora_stack_reference_2,
+        lora_stack_scale_2,
+        lora_stack_reference_3,
+        lora_stack_scale_3,
+    )
+    if (lora_reference and lora_reference.strip()) or lora_stack_specs:
         from anvil_audio.lora import resolve_lora_stack
 
         lora_items = resolve_lora_stack(
             lora_reference,
             primary_scale=float(lora_scale),
-            stack=lora_stack,
+            stack=lora_stack_specs,
         )
         apply_stack = getattr(pipeline, "apply_lora_stack", None)
         if callable(apply_stack):
@@ -942,7 +1043,9 @@ def generate_acestep(
         elif len(lora_items) == 1:
             apply_lora = getattr(pipeline, "apply_lora_adapter", None)
             if not callable(apply_lora):
-                raise RuntimeError("Current ACE-Step pipeline does not support LoRA loading.")
+                raise RuntimeError(
+                    "Current ACE-Step pipeline does not support LoRA loading."
+                )
             item = lora_items[0]
             lora_status = apply_lora(
                 item.path,
@@ -950,7 +1053,9 @@ def generate_acestep(
                 scale=float(item.scale),
             )
         else:
-            raise RuntimeError("Current ACE-Step pipeline does not support LoRA stacking.")
+            raise RuntimeError(
+                "Current ACE-Step pipeline does not support LoRA stacking."
+            )
         stack_metadata = [item.to_metadata() for item in lora_items]
         lora_metadata = {
             "lora_stack": {
@@ -1050,6 +1155,12 @@ def generate_unified(
     lora_reference: str = "",
     lora_scale: float = 1.0,
     lora_stack: str = "",
+    lora_stack_reference_1: str = "",
+    lora_stack_scale_1: float = 1.0,
+    lora_stack_reference_2: str = "",
+    lora_stack_scale_2: float = 1.0,
+    lora_stack_reference_3: str = "",
+    lora_stack_scale_3: float = 1.0,
 ) -> tuple[str, list[Any], dict[str, Any]]:
     """Route to the correct generation backend based on the currently loaded pipeline type."""
     global _last_generated_path
@@ -1072,6 +1183,12 @@ def generate_unified(
             lora_reference=lora_reference,
             lora_scale=lora_scale,
             lora_stack=lora_stack,
+            lora_stack_reference_1=lora_stack_reference_1,
+            lora_stack_scale_1=lora_stack_scale_1,
+            lora_stack_reference_2=lora_stack_reference_2,
+            lora_stack_scale_2=lora_stack_scale_2,
+            lora_stack_reference_3=lora_stack_reference_3,
+            lora_stack_scale_3=lora_stack_scale_3,
         )
     else:
         result = generate_cond(
@@ -1862,6 +1979,56 @@ def create_acestep_ui(
                     "this controls the LM/thinking path when enabled."
                 ),
             )
+            with gr.Accordion("ACE-Step LoRA", open=False):
+                with gr.Row():
+                    lora_reference = gr.Dropdown(
+                        choices=_lora_dropdown_choices(),
+                        value="",
+                        label="Adapter",
+                        allow_custom_value=True,
+                        filterable=True,
+                        info=(
+                            "Pick a registered adapter or paste a PEFT/LoKr path. "
+                            "Use refresh after importing a new adapter."
+                        ),
+                        scale=3,
+                    )
+                    lora_scale = gr.Slider(
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        value=1.0,
+                        label="LoRA scale",
+                        info=(
+                            "Adapter strength. 1.0 is full strength; lower values "
+                            "blend with the base model."
+                        ),
+                    )
+                    lora_refresh = gr.Button("↻ Refresh", variant="secondary", scale=1)
+                (
+                    lora_stack_reference_1,
+                    lora_stack_scale_1,
+                    lora_stack_reference_2,
+                    lora_stack_scale_2,
+                    lora_stack_reference_3,
+                    lora_stack_scale_3,
+                ) = _create_lora_stack_controls(gr)
+                lora_refresh.click(
+                    fn=_refresh_lora_dropdowns,
+                    inputs=[
+                        lora_reference,
+                        lora_stack_reference_1,
+                        lora_stack_reference_2,
+                        lora_stack_reference_3,
+                    ],
+                    outputs=[
+                        lora_reference,
+                        lora_stack_reference_1,
+                        lora_stack_reference_2,
+                        lora_stack_reference_3,
+                    ],
+                    show_progress="hidden",
+                )
         generate_button = gr.Button("Generate", variant="primary", scale=1)
 
     with gr.Row(equal_height=False):
@@ -1916,6 +2083,16 @@ def create_acestep_ui(
             cfg_scale_slider,
             seed_input,
             project_component,
+            gr.State("wav"),
+            lora_reference,
+            lora_scale,
+            gr.State(""),
+            lora_stack_reference_1,
+            lora_stack_scale_1,
+            lora_stack_reference_2,
+            lora_stack_scale_2,
+            lora_stack_reference_3,
+            lora_stack_scale_3,
         ],
         outputs=[audio_output, audio_spectrogram_output, metadata_output],
         api_name="generate",
@@ -2357,17 +2534,29 @@ def create_unified_txt2music_ui(
                     info="Adapter strength. 1.0 is full strength; lower values blend with the base model.",
                 )
                 lora_refresh = gr.Button("↻ Refresh", variant="secondary", scale=1)
-            lora_stack = gr.Textbox(
-                value="",
-                label="Additional adapters",
-                lines=2,
-                placeholder="adapter-two:0.5, /path/to/adapter-three:0.25",
-            )
+            (
+                lora_stack_reference_1,
+                lora_stack_scale_1,
+                lora_stack_reference_2,
+                lora_stack_scale_2,
+                lora_stack_reference_3,
+                lora_stack_scale_3,
+            ) = _create_lora_stack_controls(gr)
 
             lora_refresh.click(
-                fn=_refresh_lora_dropdown,
-                inputs=[lora_reference],
-                outputs=[lora_reference],
+                fn=_refresh_lora_dropdowns,
+                inputs=[
+                    lora_reference,
+                    lora_stack_reference_1,
+                    lora_stack_reference_2,
+                    lora_stack_reference_3,
+                ],
+                outputs=[
+                    lora_reference,
+                    lora_stack_reference_1,
+                    lora_stack_reference_2,
+                    lora_stack_reference_3,
+                ],
                 show_progress="hidden",
             )
 
@@ -2552,7 +2741,13 @@ def create_unified_txt2music_ui(
             audio_format_dropdown,
             lora_reference,
             lora_scale,
-            lora_stack,
+            gr.State(""),
+            lora_stack_reference_1,
+            lora_stack_scale_1,
+            lora_stack_reference_2,
+            lora_stack_scale_2,
+            lora_stack_reference_3,
+            lora_stack_scale_3,
         ],
         outputs=[audio_output, audio_spectrogram_output, metadata_output],
         api_name="generate",

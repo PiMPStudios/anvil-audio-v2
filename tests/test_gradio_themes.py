@@ -91,3 +91,22 @@ def test_lora_dropdown_choices_include_registered_loadable_adapters(
 
     assert ("No adapter", "") in choices
     assert ("Dark Blues (dark-blues)", "dark-blues") in choices
+
+
+def test_lora_stack_specs_combine_text_and_structured_rows():
+    specs = gradio_ui._build_lora_stack_specs(
+        "lead:0.35, texture@0.2",
+        "voice",
+        0.4,
+        "",
+        0.9,
+        "/tmp/custom-adapter",
+        "0.75",
+    )
+
+    assert specs == [
+        "lead:0.35",
+        "texture@0.2",
+        {"reference": "voice", "scale": 0.4},
+        {"reference": "/tmp/custom-adapter", "scale": 0.75},
+    ]
