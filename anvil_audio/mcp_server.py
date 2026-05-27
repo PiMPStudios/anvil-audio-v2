@@ -75,8 +75,8 @@ mcp = FastMCP(
 
 # Loaded pipeline cache — avoids reloading the same model between calls.
 # Key: (registry model name, ACE-Step MLX DiT override).  Value: BasePipeline
-# instance.  The override matters because ACE-Step LoRA requires the PyTorch
-# DiT path, while normal Apple Silicon generation may prefer native MLX DiT.
+# instance.  The override matters because callers may intentionally compare
+# native MLX DiT against the PyTorch DiT backend.
 _pipeline_cache: dict[tuple[str, bool | None], Any] = {}
 _pipeline_last_used: dict[tuple[str, bool | None], float] = {}
 
@@ -529,6 +529,7 @@ def _run_generate(
     lora: str = "",
     lora_scale: float = 1.0,
     lora_adapter_name: str = "",
+    lora_stack: list[dict[str, Any]] | str | None = None,
     use_mlx_dit: bool | None = None,
 ) -> dict[str, Any]:
     """Core generation logic shared by generate_audio and batch_generate."""
@@ -538,9 +539,20 @@ def _run_generate(
     params = entry.resolved_params() if entry else {}
     is_acestep = entry is not None and entry.pipeline_type == "acestep"
     lora_ref = lora.strip()
+    lora_items = []
+    if lora_ref or lora_stack:
+        if not is_acestep:
+            raise ValueError("LoRA adapters are only supported with ACE-Step models.")
+        from anvil_audio.lora import resolve_lora_stack
+
+        lora_items = resolve_lora_stack(
+            lora_ref,
+            primary_scale=lora_scale,
+            primary_adapter_name=lora_adapter_name,
+            stack=lora_stack,
+        )
+
     effective_use_mlx_dit = use_mlx_dit
-    if is_acestep and lora_ref and effective_use_mlx_dit is None:
-        effective_use_mlx_dit = False
 
     pipeline = _get_pipeline(model_name, use_mlx_dit=effective_use_mlx_dit)
     current_key = (model_name, effective_use_mlx_dit if is_acestep else None)
@@ -570,28 +582,30 @@ def _run_generate(
     extra: dict[str, Any] = {}
     if is_acestep and effective_use_mlx_dit is not None:
         extra["use_mlx_dit"] = effective_use_mlx_dit
-    if lora_ref:
-        if not is_acestep:
-            raise ValueError("LoRA adapters are only supported with ACE-Step models.")
-        from anvil_audio.lora import resolve_adapter_reference
+    if lora_items:
+        apply_stack = getattr(pipeline, "apply_lora_stack", None)
+        if callable(apply_stack):
+            lora_status = apply_stack(lora_items)
+        elif len(lora_items) == 1:
+            apply_lora = getattr(pipeline, "apply_lora_adapter", None)
+            if not callable(apply_lora):
+                raise RuntimeError("Selected ACE-Step pipeline does not support LoRA loading.")
+            item = lora_items[0]
+            lora_status = apply_lora(
+                item.path,
+                adapter_name=item.adapter_name,
+                scale=float(item.scale),
+            )
+        else:
+            raise RuntimeError("Selected ACE-Step pipeline does not support LoRA stacking.")
 
-        lora_path, lora_entry = resolve_adapter_reference(lora_ref)
-        apply_lora = getattr(pipeline, "apply_lora_adapter", None)
-        if not callable(apply_lora):
-            raise RuntimeError("Selected ACE-Step pipeline does not support LoRA loading.")
-        lora_status = apply_lora(
-            str(lora_path),
-            adapter_name=lora_adapter_name.strip() or None,
-            scale=float(lora_scale),
-        )
-        extra["lora"] = {
-            "reference": lora_ref,
-            "path": str(lora_path),
-            "scale": float(lora_scale),
-            "adapter_name": lora_adapter_name.strip() or None,
-            "registry_id": lora_entry.id if lora_entry else None,
+        stack_metadata = [item.to_metadata() for item in lora_items]
+        extra["lora_stack"] = {
+            "adapters": stack_metadata,
             "status": lora_status,
         }
+        if len(stack_metadata) == 1:
+            extra["lora"] = stack_metadata[0] | {"status": lora_status}
     elif is_acestep:
         disabled_lora = _disable_lora_for_plain_call(pipeline)
         if disabled_lora is not None:
@@ -731,6 +745,7 @@ def generate_audio(
     lora: str = "",
     lora_scale: float = 1.0,
     lora_adapter_name: str = "",
+    lora_stack: list[dict[str, Any]] | None = None,
     use_mlx_dit: bool | None = None,
 ) -> dict[str, Any]:
     """Generate audio from a text prompt using a registered model.
@@ -765,11 +780,11 @@ def generate_audio(
         lora_scale: Adapter strength. 1.0 = full strength; lower values blend
                     with the base model.
         lora_adapter_name: Optional runtime adapter name for ACE-Step.
+        lora_stack: Optional list of additional adapters. Each item may include
+                    reference/lora/path, scale, and adapter_name.
         use_mlx_dit: ACE-Step backend override. False disables native MLX
-                     DiT/VAE for this call, which is required for current
-                     PEFT/LoKr LoRA adapters. True forces MLX DiT. Null/omitted
-                     uses registry/env defaults, except LoRA calls default to
-                     False automatically.
+                     DiT/VAE for this call. True forces MLX DiT. Null/omitted
+                     uses registry/env defaults.
 
     Returns:
         dict with keys: path (str), sidecar_path (str), metadata (dict)
@@ -791,6 +806,7 @@ def generate_audio(
             lora=lora,
             lora_scale=lora_scale,
             lora_adapter_name=lora_adapter_name,
+            lora_stack=lora_stack,
             use_mlx_dit=use_mlx_dit,
         )
     except Exception as exc:
@@ -807,7 +823,7 @@ def batch_generate(
     Each item in the list is a condition dict with the same keys as
     generate_audio: prompt (required), model, duration_seconds, steps,
     cfg_scale, seed, fmt, lyrics, negative_prompt, lora, lora_scale,
-    lora_adapter_name, and use_mlx_dit. Items using the same model/backend
+    lora_adapter_name, lora_stack, and use_mlx_dit. Items using the same model/backend
     share the cached pipeline — no reload penalty.
 
     Args:
@@ -846,6 +862,7 @@ def batch_generate(
                 lora=str(item.get("lora", "")),
                 lora_scale=float(item.get("lora_scale", 1.0)),
                 lora_adapter_name=str(item.get("lora_adapter_name", "")),
+                lora_stack=item.get("lora_stack"),
                 use_mlx_dit=item.get("use_mlx_dit"),
             )
             results.append(result)

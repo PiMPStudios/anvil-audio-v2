@@ -377,10 +377,14 @@ def test_apply_lora_adapter_delegates_to_acestep_handler(monkeypatch, tmp_path):
     assert second["message"] == "Adapter already loaded: style"
 
 
-def test_apply_lora_adapter_rejects_native_mlx_dit(monkeypatch, tmp_path):
-    """Native MLX DiT currently bypasses ACE-Step's PyTorch LoRA injection."""
+def test_apply_lora_adapter_uses_mlx_bridge_when_native_dit_active(monkeypatch, tmp_path):
+    """Native MLX DiT applies PEFT adapters through Anvil's MLX bridge."""
+    calls = {}
 
     class FakeAceStepHandler:
+        use_mlx_dit = True
+        mlx_decoder = object()
+
         def initialize_service(self, **kwargs):
             return "ok", True
 
@@ -391,10 +395,28 @@ def test_apply_lora_adapter_rejects_native_mlx_dit(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "acestep.handler", handler_mod)
 
     from anvil_audio.pipelines.acestep import ACEStepPipeline
+    import anvil_audio.mlx_lora as mlx_lora
 
     adapter_dir = tmp_path / "adapter"
     adapter_dir.mkdir()
+    (adapter_dir / "adapter_config.json").write_text(
+        '{"peft_type": "LORA"}',
+        encoding="utf-8",
+    )
+    (adapter_dir / "adapter_model.safetensors").write_bytes(b"placeholder")
+
+    def fake_apply(decoder, adapters, *, enabled=True):
+        calls["decoder"] = decoder
+        calls["adapters"] = adapters
+        calls["enabled"] = enabled
+        return {"backend": "mlx", "loaded": True, "active": enabled}
+
+    monkeypatch.setattr(mlx_lora, "apply_lora_stack_to_mlx_decoder", fake_apply)
     pipe = ACEStepPipeline(project_root=str(tmp_path), device="cpu", use_mlx_dit=True)
 
-    with pytest.raises(RuntimeError, match="PyTorch DiT backend"):
-        pipe.apply_lora_adapter(str(adapter_dir))
+    status = pipe.apply_lora_adapter(str(adapter_dir), adapter_name="style", scale=0.7)
+
+    assert calls["decoder"] is FakeAceStepHandler.mlx_decoder
+    assert calls["adapters"][0].adapter_name == "style"
+    assert calls["adapters"][0].scale == 0.7
+    assert status["backend"] == "mlx"

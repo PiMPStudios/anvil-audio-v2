@@ -85,13 +85,73 @@ def test_mcp_generate_applies_lora_and_records_metadata(monkeypatch, tmp_path):
     )
 
     assert "error" not in result
-    assert seen_pipeline_kwargs["use_mlx_dit"] is False
+    assert seen_pipeline_kwargs["use_mlx_dit"] is None
     assert fake_pipeline.lora_calls[0][1:] == ("style", 0.75)
     metadata = result["metadata"]
     assert metadata["extra"]["lora"]["registry_id"] == "dark-blues"
     assert metadata["extra"]["lora"]["scale"] == 0.75
     assert metadata["extra"]["lyrics"] == "[Instrumental]"
-    assert metadata["extra"]["use_mlx_dit"] is False
+
+
+def test_mcp_generate_applies_lora_stack(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANVIL_AUDIO_LORA_DIR", str(tmp_path / "lora-cache"))
+    monkeypatch.setattr(OutputManager, "DEFAULT_BASE", tmp_path / "outputs")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_fake_peft_adapter(first)
+    _write_fake_peft_adapter(second)
+    import_local_adapter(first, name="Lead Style")
+    import_local_adapter(second, name="Room Tone")
+
+    class FakeEntry:
+        name = "acestep-v1.5-sft"
+        pipeline_type = "acestep"
+        max_duration = 60.0
+
+        def resolved_params(self):
+            return {"steps": 4, "cfg_scale": 6.0, "sampler_type": "ode"}
+
+    class FakePipeline:
+        sample_rate = 10
+
+        def __init__(self):
+            self.stack_calls = []
+
+        def apply_lora_stack(self, adapters, enabled=True):
+            self.stack_calls.append((adapters, enabled))
+            return {"enabled": enabled, "count": len(adapters)}
+
+        def generate(self, *_args, **_kwargs):
+            return torch.zeros(1, 1, 20)
+
+    fake_pipeline = FakePipeline()
+    monkeypatch.setattr(mcp_server.registry, "get_model", lambda _name: FakeEntry())
+    monkeypatch.setattr(mcp_server, "_get_pipeline", lambda _name, **_kwargs: fake_pipeline)
+
+    result = mcp_server._run_generate(
+        prompt="dark blues",
+        model_name="acestep-v1.5-sft",
+        duration=1.0,
+        steps=None,
+        cfg_scale=None,
+        seed=123,
+        fmt="wav",
+        project="mcp-test",
+        lyrics="[Instrumental]",
+        lora="lead-style",
+        lora_scale=0.75,
+        lora_adapter_name="lead",
+        lora_stack=[{"reference": "room-tone", "scale": 0.25}],
+    )
+
+    assert "error" not in result
+    adapters, enabled = fake_pipeline.stack_calls[0]
+    assert enabled is True
+    assert [item.adapter_name for item in adapters] == ["lead", "room-tone"]
+    assert [item.scale for item in adapters] == [0.75, 0.25]
+    metadata = result["metadata"]["extra"]["lora_stack"]
+    assert len(metadata["adapters"]) == 2
+    assert metadata["status"]["count"] == 2
 
 
 def test_mcp_generate_without_lora_disables_cached_active_lora(monkeypatch, tmp_path):

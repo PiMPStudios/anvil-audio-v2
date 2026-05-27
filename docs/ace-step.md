@@ -167,6 +167,14 @@ anvil generate --model acestep-v1.5-sft \
     --lora my-style \
     --lora-scale 0.8 \
     --seconds-total 60
+
+# Stack multiple PEFT LoRAs
+anvil generate --model acestep-v1.5-sft \
+    --prompt "my_style, roomy live band, gritty guitars" \
+    --lora my-style \
+    --lora-scale 0.75 \
+    --lora-stack room-tone:0.25 \
+    --seconds-total 60
 ```
 
 Batch YAML format — each entry supports `prompt`, `negative_prompt`, `lyrics`,
@@ -287,11 +295,14 @@ anvil generate --model acestep-v1.5-sft \
 
 Use an adapter in Gradio by loading an ACE-Step model, opening the
 **ACE-Step LoRA** accordion, and selecting a registered adapter from the
-dropdown. You can still paste a direct PEFT/LoKr path as a custom value.
+dropdown. You can still paste a direct PEFT/LoKr path as a custom value. Add
+more PEFT adapters in the additional-adapters box with `adapter:scale` entries.
 
-On Apple Silicon, ACE-Step normally uses Anvil's native MLX DiT path for speed.
-Current PEFT/LoKr adapters patch ACE-Step's PyTorch DiT modules, so LoRA
-generation must use the PyTorch DiT backend for now:
+On Apple Silicon, PEFT LoRA directories can run on Anvil's native MLX DiT path.
+Anvil reads the PEFT weights and applies the tiny LoRA A/B matrices directly to
+matching MLX Linear projections, so the large XL DiT can stay in MLX instead of
+falling back to PyTorch/MPS. LoKr/LyCORIS adapters still use ACE-Step's PyTorch
+DiT backend:
 
 ```bash
 ANVIL_ACESTEP_USE_MLX_DIT=0 python ./run_gradio.py
@@ -300,8 +311,8 @@ ANVIL_ACESTEP_USE_MLX_DIT=0 anvil generate --model acestep-v1.5-sft \
     --lora my-style
 ```
 
-If MLX DiT is active and a LoRA is selected, Anvil fails loudly instead of
-pretending the adapter affected the audio.
+If MLX DiT is active and an unsupported adapter format is selected, Anvil fails
+loudly instead of pretending the adapter affected the audio.
 
 Anvil does not scan other applications for adapters. Keep this repo's LoRA path
 explicit: train an adapter here, import a local PEFT/LoKr folder, or import a

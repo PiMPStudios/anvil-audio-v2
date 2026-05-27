@@ -39,6 +39,7 @@ Command and flag reference for Gradio, generation, datasets, cloud jobs, LoRA, a
 | `--lora` | blank | ACE-Step adapter id/name or direct PEFT/LoKr path |
 | `--lora-scale` | `1.0` | ACE-Step adapter strength |
 | `--lora-adapter-name` | blank | Optional runtime adapter name |
+| `--lora-stack` | repeatable | Additional ACE-Step adapter as `id-or-path[:scale]` |
 | `--output-dir` | `./output` | Output directory |
 | `--format` | `wav` | `wav`, `flac`, `mp3`, or `ogg` |
 | `--clip-length` | off | Clip to `seconds_total` |

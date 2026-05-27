@@ -6,6 +6,7 @@ from anvil_audio.lora import (
     import_local_adapter,
     list_adapters,
     resolve_adapter_reference,
+    resolve_lora_stack,
 )
 from anvil_audio.lora_training import (
     LoRATrainConfig,
@@ -55,6 +56,27 @@ def test_native_anvil_adapter_is_tracked_but_not_loadable(tmp_path):
     assert adapter_format == "anvil-native"
     assert loadable is False
     assert "MLX adapter" in notes[0]
+
+
+def test_resolve_lora_stack_accepts_primary_and_text_specs(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANVIL_AUDIO_LORA_DIR", str(tmp_path / "lora-cache"))
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_fake_peft_adapter(first)
+    _write_fake_peft_adapter(second)
+    import_local_adapter(first, name="Lead Style")
+    import_local_adapter(second, name="Room Tone")
+
+    stack = resolve_lora_stack(
+        "lead-style",
+        primary_scale=0.8,
+        primary_adapter_name="style",
+        stack="room-tone:0.25",
+    )
+
+    assert [item.registry_id for item in stack] == ["lead-style", "room-tone"]
+    assert [item.adapter_name for item in stack] == ["style", "room-tone"]
+    assert [item.scale for item in stack] == [0.8, 0.25]
 
 
 def test_write_acestep_dataset_json_from_anvil_dataset(tmp_path):

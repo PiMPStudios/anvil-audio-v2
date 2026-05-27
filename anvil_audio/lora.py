@@ -5,21 +5,21 @@ Adapters live outside the git checkout by default:
     ~/.cache/anvil-audio/lora/adapters/<adapter-id>/
 
 The registry is intentionally lightweight. It records where an adapter came
-from and whether ACE-Step can load it directly. Runtime injection is still
-delegated to ACE-Step's own handler so we stay compatible with upstream PEFT
-LoRA and LoKr/LyCORIS formats.
+from and whether Anvil can load it through ACE-Step's PyTorch path or the
+native MLX PEFT bridge.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping, Sequence
 
 AdapterFormat = Literal["peft", "lokr", "anvil-native", "unknown"]
 UTC = timezone.utc
@@ -68,6 +68,28 @@ class LoRAAdapterEntry:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class LoRAStackItem:
+    """Resolved runtime LoRA adapter entry used by generation backends."""
+
+    reference: str
+    path: str
+    adapter_name: str
+    scale: float = 1.0
+    registry_id: str | None = None
+    format: AdapterFormat | None = None
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "reference": self.reference,
+            "path": self.path,
+            "adapter_name": self.adapter_name,
+            "scale": self.scale,
+            "registry_id": self.registry_id,
+            "format": self.format,
+        }
 
 
 def lora_cache_root() -> Path:
@@ -136,6 +158,61 @@ def resolve_adapter_reference(reference: str) -> tuple[Path, LoRAAdapterEntry | 
         details = "; ".join(notes) if notes else "unsupported adapter layout"
         raise ValueError(f"LoRA adapter is not loadable by ACE-Step: {path} ({details})")
     return path.resolve(), None
+
+
+def resolve_lora_stack(
+    primary_reference: str = "",
+    *,
+    primary_scale: float = 1.0,
+    primary_adapter_name: str = "",
+    stack: str | Sequence[str | Mapping[str, Any]] | None = None,
+) -> list[LoRAStackItem]:
+    """Resolve a primary LoRA plus optional stack specs into runtime entries.
+
+    Stack text accepts comma- or newline-separated entries. Each entry may be
+    ``adapter`` or ``adapter:scale``. Structured callers can pass dictionaries
+    with ``reference``/``lora``/``path``, ``scale``, and ``adapter_name`` keys.
+    """
+    items: list[LoRAStackItem] = []
+    used_names: set[str] = set()
+
+    primary = primary_reference.strip()
+    if primary:
+        items.append(
+            _resolve_lora_stack_item(
+                reference=primary,
+                scale=primary_scale,
+                adapter_name=primary_adapter_name,
+                used_names=used_names,
+            )
+        )
+
+    for spec in _iter_stack_specs(stack):
+        if isinstance(spec, str):
+            reference, scale = _parse_stack_text_spec(spec)
+            adapter_name = ""
+        else:
+            reference = str(
+                spec.get("reference")
+                or spec.get("lora")
+                or spec.get("adapter")
+                or spec.get("path")
+                or ""
+            ).strip()
+            if not reference:
+                continue
+            scale = spec.get("scale", 1.0)
+            adapter_name = str(spec.get("adapter_name") or spec.get("name") or "")
+        items.append(
+            _resolve_lora_stack_item(
+                reference=reference,
+                scale=scale,
+                adapter_name=adapter_name,
+                used_names=used_names,
+            )
+        )
+
+    return items
 
 
 def import_local_adapter(
@@ -321,6 +398,83 @@ def _unique_adapter_id(name: str, *, force: bool) -> str:
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug or "adapter"
+
+
+def _iter_stack_specs(
+    stack: str | Sequence[str | Mapping[str, Any]] | None,
+) -> list[str | Mapping[str, Any]]:
+    if stack is None:
+        return []
+    if isinstance(stack, str):
+        return [
+            part.strip()
+            for part in re.split(r"[\n,]+", stack)
+            if part and part.strip()
+        ]
+    return list(stack)
+
+
+def _parse_stack_text_spec(spec: str) -> tuple[str, float]:
+    text = spec.strip()
+    for separator in ("@", "="):
+        if separator in text:
+            reference, raw_scale = text.rsplit(separator, 1)
+            if reference.strip():
+                try:
+                    return reference.strip(), _normalise_lora_scale(raw_scale)
+                except ValueError:
+                    pass
+    if ":" in text:
+        reference, raw_scale = text.rsplit(":", 1)
+        if reference.strip():
+            try:
+                return reference.strip(), _normalise_lora_scale(raw_scale)
+            except ValueError:
+                pass
+    return text, 1.0
+
+
+def _resolve_lora_stack_item(
+    *,
+    reference: str,
+    scale: Any,
+    adapter_name: str,
+    used_names: set[str],
+) -> LoRAStackItem:
+    path, entry = resolve_adapter_reference(reference)
+    base_name = adapter_name.strip() or (entry.id if entry is not None else path.stem)
+    runtime_name = _unique_runtime_adapter_name(base_name, used_names)
+    return LoRAStackItem(
+        reference=reference,
+        path=str(path),
+        adapter_name=runtime_name,
+        scale=_normalise_lora_scale(scale),
+        registry_id=entry.id if entry is not None else None,
+        format=entry.format if entry is not None else detect_adapter_format(path)[0],
+    )
+
+
+def _normalise_lora_scale(value: Any) -> float:
+    try:
+        scale = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid LoRA scale: {value!r}") from exc
+    if not math.isfinite(scale):
+        raise ValueError(f"Invalid LoRA scale: {value!r}")
+    return max(0.0, min(1.0, scale))
+
+
+def _unique_runtime_adapter_name(base_name: str, used_names: set[str]) -> str:
+    clean = base_name.strip() or "adapter"
+    if clean not in used_names:
+        used_names.add(clean)
+        return clean
+    for index in range(2, 10_000):
+        candidate = f"{clean}-{index}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+    raise RuntimeError(f"Could not create a unique runtime adapter name for {base_name!r}")
 
 
 def _safetensors_has_lokr_config(path: Path) -> bool:

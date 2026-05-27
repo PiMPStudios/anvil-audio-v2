@@ -13,17 +13,18 @@ The MCP runtime is included in the default install. If you installed with
 .venv/bin/python -m anvil_audio.mcp_server
 ```
 
-For ACE-Step LoRA generation on Apple Silicon, start the MCP server with
-`--no-mlx-dit`. PEFT/LoKr adapters currently patch ACE-Step's PyTorch DiT, so
-the server needs the PyTorch DiT backend when a LoRA is selected:
+On Apple Silicon, ACE-Step PEFT LoRA directories can run through the native MLX
+DiT path. Start the server normally for the registry/env default. Use
+`--no-mlx-dit` only when you need the PyTorch DiT backend, such as LoKr/LyCORIS
+adapters or backend comparison:
 
 ```bash
 .venv/bin/python -m anvil_audio.mcp_server --no-mlx-dit
 ```
 
-Use `--use-mlx-dit` to explicitly force the native MLX DiT/VAE path for normal
-non-LoRA ACE-Step generation. These flags set `ANVIL_ACESTEP_USE_MLX_DIT` for
-the MCP server process before any model is loaded.
+Use `--use-mlx-dit` to explicitly force the native MLX DiT/VAE path. These flags
+set `ANVIL_ACESTEP_USE_MLX_DIT` for the MCP server process before any model is
+loaded.
 
 ## Available tools
 
@@ -47,8 +48,8 @@ All `generate_audio` and `batch_generate` responses include `generation_duration
 the wall-clock time from the start of inference to the file being written. This lets you
 compare backends directly (e.g. PyTorch MPS vs MLX) without any external timing.
 
-ACE-Step generation tools also accept `lora`, `lora_scale`, and
-`lora_adapter_name`. They also accept per-call `use_mlx_dit`. Use
+ACE-Step generation tools also accept `lora`, `lora_scale`,
+`lora_adapter_name`, and `lora_stack`. They also accept per-call `use_mlx_dit`. Use
 `list_lora_adapters` to discover registered adapter IDs, then pass the adapter
 id or a direct PEFT/LoKr path:
 
@@ -58,15 +59,24 @@ generate_audio(
   model="acestep-v1.5-sft",
   lora="dark-blues-h200-sft",
   lora_scale=0.75,
-  use_mlx_dit=false,
   negative_prompt="muddy mix, harsh treble, weak drums"
 )
 ```
 
-For LoRA calls, MCP automatically defaults `use_mlx_dit` to `false` when you do
-not specify it, because current PEFT/LoKr adapters apply to ACE-Step's PyTorch
-DiT. Explicitly pass `use_mlx_dit=true` only for non-LoRA ACE-Step calls where
-you want the native MLX DiT/VAE backend.
+Stack additional PEFT adapters by passing `lora_stack` items:
+
+```text
+generate_audio(
+  prompt="dark blues noir rock, roomy live drums",
+  model="acestep-v1.5-sft",
+  lora="dark-blues-h200-sft",
+  lora_scale=0.75,
+  lora_stack=[{"reference": "room-tone", "scale": 0.25}]
+)
+```
+
+When `use_mlx_dit` is omitted, MCP follows the registry/env backend default.
+Pass `use_mlx_dit=false` for LoKr/LyCORIS adapters, or `true` to force MLX DiT.
 
 Models are loaded lazily on first use and cached between calls. The MCP server
 keeps a small LRU cache of loaded pipelines so desktop memory does not climb

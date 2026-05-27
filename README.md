@@ -104,7 +104,7 @@ anvil generate --model acestep-v1.5-sft \
 Use a registered LoRA adapter:
 
 ```bash
-ANVIL_ACESTEP_USE_MLX_DIT=0 anvil generate --model acestep-v1.5-xl-sft \
+anvil generate --model acestep-v1.5-xl-sft \
     --prompt "dark blues noir rock, raw guitar, cinematic atmosphere" \
     --lora dark-blues-xl-sft \
     --lora-scale 0.8 \
@@ -150,7 +150,9 @@ The MCP runtime is included in the default install:
 .venv/bin/python -m anvil_audio.mcp_server
 ```
 
-For ACE-Step LoRA generation on Apple Silicon, use the PyTorch DiT backend:
+ACE-Step PEFT LoRAs can run through the native MLX DiT path on Apple Silicon.
+Use `--no-mlx-dit` only when you specifically need the PyTorch backend, such as
+for LoKr/LyCORIS adapters or backend comparisons:
 
 ```bash
 .venv/bin/python -m anvil_audio.mcp_server --no-mlx-dit

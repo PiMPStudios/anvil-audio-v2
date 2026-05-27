@@ -895,6 +895,7 @@ def generate_acestep(
     audio_format: str = "wav",
     lora_reference: str = "",
     lora_scale: float = 1.0,
+    lora_stack: str = "",
 ) -> tuple[str, list[Any], dict[str, Any]]:
     """Generate music with ACE-Step.
 
@@ -911,6 +912,7 @@ def generate_acestep(
         project:       Project name for output routing.
         lora_reference: Optional registered adapter id/name or direct path.
         lora_scale:     LoRA strength from 0.0 to 1.0.
+        lora_stack:     Additional comma/newline stack entries as adapter[:scale].
 
     Returns:
         ``(wav_path, [spectrogram_image], metadata_dict)``
@@ -926,24 +928,39 @@ def generate_acestep(
     if negative_prompt:
         print(f"\tNegative prompt: {negative_prompt}")
     lora_metadata: dict[str, Any] = {}
-    if lora_reference and lora_reference.strip():
-        from anvil_audio.lora import resolve_adapter_reference
+    if (lora_reference and lora_reference.strip()) or (lora_stack and lora_stack.strip()):
+        from anvil_audio.lora import resolve_lora_stack
 
-        lora_path, lora_entry = resolve_adapter_reference(lora_reference)
-        apply_lora = getattr(pipeline, "apply_lora_adapter", None)
-        if not callable(apply_lora):
-            raise RuntimeError("Current ACE-Step pipeline does not support LoRA loading.")
-        lora_status = apply_lora(str(lora_path), scale=float(lora_scale))
+        lora_items = resolve_lora_stack(
+            lora_reference,
+            primary_scale=float(lora_scale),
+            stack=lora_stack,
+        )
+        apply_stack = getattr(pipeline, "apply_lora_stack", None)
+        if callable(apply_stack):
+            lora_status = apply_stack(lora_items)
+        elif len(lora_items) == 1:
+            apply_lora = getattr(pipeline, "apply_lora_adapter", None)
+            if not callable(apply_lora):
+                raise RuntimeError("Current ACE-Step pipeline does not support LoRA loading.")
+            item = lora_items[0]
+            lora_status = apply_lora(
+                item.path,
+                adapter_name=item.adapter_name,
+                scale=float(item.scale),
+            )
+        else:
+            raise RuntimeError("Current ACE-Step pipeline does not support LoRA stacking.")
+        stack_metadata = [item.to_metadata() for item in lora_items]
         lora_metadata = {
-            "lora": {
-                "reference": lora_reference,
-                "path": str(lora_path),
-                "scale": float(lora_scale),
-                "registry_id": lora_entry.id if lora_entry else None,
+            "lora_stack": {
+                "adapters": stack_metadata,
                 "status": lora_status,
             }
         }
-        print(f"\tLoRA: {lora_reference} scale={float(lora_scale):.2f}")
+        if len(stack_metadata) == 1:
+            lora_metadata["lora"] = stack_metadata[0] | {"status": lora_status}
+        print(f"\tLoRA stack: {len(stack_metadata)} adapter(s)")
     print(
         f"\tDuration: {seconds_total}s  |  Steps: {steps}  |  CFG: {cfg_scale}  |  Seed: {seed}"
     )
@@ -1032,6 +1049,7 @@ def generate_unified(
     audio_format: str = "wav",
     lora_reference: str = "",
     lora_scale: float = 1.0,
+    lora_stack: str = "",
 ) -> tuple[str, list[Any], dict[str, Any]]:
     """Route to the correct generation backend based on the currently loaded pipeline type."""
     global _last_generated_path
@@ -1053,6 +1071,7 @@ def generate_unified(
             audio_format=audio_format,
             lora_reference=lora_reference,
             lora_scale=lora_scale,
+            lora_stack=lora_stack,
         )
     else:
         result = generate_cond(
@@ -2338,6 +2357,12 @@ def create_unified_txt2music_ui(
                     info="Adapter strength. 1.0 is full strength; lower values blend with the base model.",
                 )
                 lora_refresh = gr.Button("↻ Refresh", variant="secondary", scale=1)
+            lora_stack = gr.Textbox(
+                value="",
+                label="Additional adapters",
+                lines=2,
+                placeholder="adapter-two:0.5, /path/to/adapter-three:0.25",
+            )
 
             lora_refresh.click(
                 fn=_refresh_lora_dropdown,
@@ -2527,6 +2552,7 @@ def create_unified_txt2music_ui(
             audio_format_dropdown,
             lora_reference,
             lora_scale,
+            lora_stack,
         ],
         outputs=[audio_output, audio_spectrogram_output, metadata_output],
         api_name="generate",

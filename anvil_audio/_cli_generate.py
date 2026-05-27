@@ -162,6 +162,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="ACE-Step only: optional runtime adapter name.",
     )
+    p.add_argument(
+        "--lora-stack",
+        action="append",
+        default=[],
+        metavar="NAME_OR_PATH[:SCALE]",
+        help=(
+            "ACE-Step only: add another LoRA adapter to the runtime stack. "
+            "Can be passed multiple times."
+        ),
+    )
 
     # ---- Output ----
     p.add_argument(
@@ -410,30 +420,42 @@ def main() -> None:
         _entry = registry.get_model(args.model)
         is_acestep = _entry is not None and _entry.pipeline_type == "acestep"
     lora_metadata: dict[str, Any] = {}
-    if args.lora:
+    if args.lora or args.lora_stack:
         if not is_acestep:
-            parser.error("--lora is only supported with ACE-Step registry models.")
-        from anvil_audio.lora import resolve_adapter_reference
+            parser.error("--lora/--lora-stack are only supported with ACE-Step registry models.")
+        from anvil_audio.lora import resolve_lora_stack
 
-        lora_path, lora_entry = resolve_adapter_reference(args.lora)
-        apply_lora = getattr(pipeline, "apply_lora_adapter", None)
-        if not callable(apply_lora):
-            parser.error("selected ACE-Step pipeline does not expose LoRA loading.")
-        lora_status = apply_lora(
-            str(lora_path),
-            adapter_name=args.lora_adapter_name or None,
-            scale=float(args.lora_scale),
+        lora_items = resolve_lora_stack(
+            args.lora,
+            primary_scale=float(args.lora_scale),
+            primary_adapter_name=args.lora_adapter_name,
+            stack=args.lora_stack,
         )
+        apply_stack = getattr(pipeline, "apply_lora_stack", None)
+        if callable(apply_stack):
+            lora_status = apply_stack(lora_items)
+        elif len(lora_items) == 1:
+            apply_lora = getattr(pipeline, "apply_lora_adapter", None)
+            if not callable(apply_lora):
+                parser.error("selected ACE-Step pipeline does not expose LoRA loading.")
+            item = lora_items[0]
+            lora_status = apply_lora(
+                item.path,
+                adapter_name=item.adapter_name,
+                scale=float(item.scale),
+            )
+        else:
+            parser.error("selected ACE-Step pipeline does not expose LoRA stacking.")
+
+        stack_metadata = [item.to_metadata() for item in lora_items]
         lora_metadata = {
-            "lora": {
-                "reference": args.lora,
-                "path": str(lora_path),
-                "scale": float(args.lora_scale),
-                "adapter_name": args.lora_adapter_name or None,
-                "registry_id": lora_entry.id if lora_entry else None,
+            "lora_stack": {
+                "adapters": stack_metadata,
                 "status": lora_status,
             }
         }
+        if len(stack_metadata) == 1:
+            lora_metadata["lora"] = stack_metadata[0] | {"status": lora_status}
 
     batch_window = args.batch_size
 

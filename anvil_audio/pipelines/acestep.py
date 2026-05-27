@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import os
 import sys
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +135,20 @@ def _raise_for_missing_xl_checkpoint(project_root: str, config_path: str) -> Non
         f"To intentionally restore upstream auto-download behavior for this "
         f"process, set {_XL_AUTO_DOWNLOAD_ENV}=1."
     )
+
+
+def _lora_stack_item_metadata(item: Any) -> dict[str, Any]:
+    to_metadata = getattr(item, "to_metadata", None)
+    if callable(to_metadata):
+        return to_metadata()
+    return {
+        "reference": str(getattr(item, "reference", getattr(item, "path", ""))),
+        "path": str(getattr(item, "path", "")),
+        "adapter_name": str(getattr(item, "adapter_name", "")),
+        "scale": float(getattr(item, "scale", 1.0)),
+        "registry_id": getattr(item, "registry_id", None),
+        "format": getattr(item, "format", None),
+    }
 
 
 class ACEStepPipeline(BasePipeline):
@@ -297,6 +312,13 @@ class ACEStepPipeline(BasePipeline):
         self._lm_init_attempted: bool = False
 
         self._loaded_lora_adapters: dict[str, str] = {}
+
+    def _mlx_dit_active(self) -> bool:
+        """Return whether ACE-Step actually initialized the native MLX DiT."""
+        return bool(
+            getattr(self._handler, "use_mlx_dit", self._use_mlx_dit)
+            and getattr(self._handler, "mlx_decoder", None) is not None
+        )
 
     @staticmethod
     def _lm_requested(
@@ -713,36 +735,106 @@ class ACEStepPipeline(BasePipeline):
     ) -> dict[str, Any]:
         """Load and activate an ACE-Step LoRA/LoKr adapter.
 
-        The actual injection/scaling is delegated to ACE-Step's handler. This
-        wrapper makes the operation idempotent for the common case where the UI
-        or CLI sends the same adapter path across multiple generations.
+        The PyTorch DiT path delegates to ACE-Step's PEFT/LoKr handler.  When
+        native MLX DiT is active, PEFT LoRA directories are bridged directly
+        onto matching MLX Linear projections so the large base DiT stays in MLX.
         """
-        if self._use_mlx_dit:
-            raise RuntimeError(
-                "ACE-Step LoRA adapters currently require the PyTorch DiT "
-                "backend. Native MLX DiT generation is active, so the adapter "
-                "would not affect the generated audio. Restart with "
-                "ANVIL_ACESTEP_USE_MLX_DIT=0 or set the registry param "
-                "`use_mlx_dit: false` for this model before using LoRA."
-            )
-
         path = str(Path(lora_path).expanduser().resolve())
         effective_name = adapter_name or Path(path).name
+        from anvil_audio.lora import LoRAStackItem, detect_adapter_format
 
-        loaded_path = self._loaded_lora_adapters.get(effective_name)
-        if loaded_path != path:
-            message = self._handler.add_lora(path, adapter_name=adapter_name)
-            if not str(message).startswith("✅"):
-                raise RuntimeError(str(message))
-            self._loaded_lora_adapters[effective_name] = path
-        else:
-            message = f"Adapter already loaded: {effective_name}"
+        adapter_format = detect_adapter_format(Path(path))[0]
+        return self.apply_lora_stack(
+            [
+                LoRAStackItem(
+                    reference=lora_path,
+                    path=path,
+                    adapter_name=effective_name,
+                    scale=float(scale),
+                    registry_id=None,
+                    format=adapter_format,
+                )
+            ],
+            enabled=enabled,
+        )
 
-        active_message = ""
-        if adapter_name and hasattr(self._handler, "set_active_lora_adapter"):
-            active_message = str(self._handler.set_active_lora_adapter(adapter_name))
+    def apply_lora_stack(
+        self,
+        adapters: list[Any],
+        *,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Load and activate one or more LoRA adapters as a single stack."""
+        if not adapters:
+            return self.set_lora_enabled(False)
 
-        scale_message = str(self._handler.set_lora_scale(effective_name, scale))
+        if self._mlx_dit_active():
+            return self._apply_mlx_lora_stack(adapters, enabled=enabled)
+
+        return self._apply_torch_lora_stack(adapters, enabled=enabled)
+
+    def _apply_mlx_lora_stack(
+        self,
+        adapters: list[Any],
+        *,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        from anvil_audio.mlx_lora import apply_lora_stack_to_mlx_decoder
+
+        for item in adapters:
+            adapter_format = getattr(item, "format", None)
+            if adapter_format and adapter_format != "peft":
+                raise RuntimeError(
+                    "Native MLX DiT LoRA currently supports PEFT LoRA "
+                    f"directories only; got {adapter_format!r} for "
+                    f"{getattr(item, 'reference', getattr(item, 'path', 'adapter'))}."
+                )
+
+        status = apply_lora_stack_to_mlx_decoder(
+            getattr(self._handler, "mlx_decoder", None),
+            adapters,
+            enabled=enabled,
+        )
+        self._loaded_lora_adapters = {
+            str(getattr(item, "adapter_name")): str(getattr(item, "path"))
+            for item in adapters
+        }
+        return {
+            "backend": "mlx",
+            "message": status.get("message", "Applied LoRA stack to MLX DiT"),
+            "adapters": [
+                _lora_stack_item_metadata(item)
+                for item in adapters
+            ],
+            "enabled": bool(enabled),
+            "status": status,
+        }
+
+    def _apply_torch_lora_stack(
+        self,
+        adapters: list[Any],
+        *,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        messages: list[str] = []
+        scale_messages: list[str] = []
+        for item in adapters:
+            path = str(Path(str(getattr(item, "path"))).expanduser().resolve())
+            effective_name = str(getattr(item, "adapter_name") or Path(path).name)
+            scale = float(getattr(item, "scale", 1.0))
+
+            loaded_path = self._loaded_lora_adapters.get(effective_name)
+            if loaded_path != path:
+                message = self._handler.add_lora(path, adapter_name=effective_name)
+                if not str(message).startswith("✅"):
+                    raise RuntimeError(str(message))
+                self._loaded_lora_adapters[effective_name] = path
+            else:
+                message = f"Adapter already loaded: {effective_name}"
+            messages.append(str(message))
+            scale_messages.append(str(self._handler.set_lora_scale(effective_name, scale)))
+
+        active_message = self._activate_torch_lora_stack(adapters)
         enabled_message = str(self._handler.set_use_lora(bool(enabled)))
         status = (
             self._handler.get_lora_status()
@@ -750,19 +842,95 @@ class ACEStepPipeline(BasePipeline):
             else {}
         )
         return {
-            "message": str(message),
+            "backend": "torch",
+            "message": "; ".join(messages),
             "active_message": active_message,
-            "scale_message": scale_message,
+            "scale_message": "; ".join(scale_messages),
             "enabled_message": enabled_message,
-            "path": path,
-            "adapter_name": effective_name,
-            "scale": float(scale),
+            "adapters": [
+                _lora_stack_item_metadata(item)
+                for item in adapters
+            ],
+            "path": str(getattr(adapters[0], "path")),
+            "adapter_name": str(getattr(adapters[0], "adapter_name")),
+            "scale": float(getattr(adapters[0], "scale", 1.0)),
             "enabled": bool(enabled),
             "status": status,
         }
 
+    def _activate_torch_lora_stack(self, adapters: list[Any]) -> str:
+        if len(adapters) == 1:
+            adapter_name = str(getattr(adapters[0], "adapter_name"))
+            if hasattr(self._handler, "set_active_lora_adapter"):
+                return str(self._handler.set_active_lora_adapter(adapter_name))
+            return ""
+
+        decoder = getattr(getattr(self._handler, "model", None), "decoder", None)
+        if decoder is None:
+            raise RuntimeError("ACE-Step decoder is unavailable for LoRA stacking.")
+
+        adapter_names = [str(getattr(item, "adapter_name")) for item in adapters]
+        weights = [float(getattr(item, "scale", 1.0)) for item in adapters]
+        stack_name = self._torch_lora_stack_name(adapter_names, weights)
+        peft_config = getattr(decoder, "peft_config", {}) or {}
+        if stack_name not in peft_config:
+            owner = decoder
+            add_weighted = getattr(owner, "add_weighted_adapter", None)
+            if not callable(add_weighted):
+                owner = getattr(decoder, "base_model", None)
+                add_weighted = getattr(owner, "add_weighted_adapter", None)
+            if not callable(add_weighted):
+                set_adapter = getattr(decoder, "set_adapter", None)
+                if callable(set_adapter):
+                    try:
+                        set_adapter(adapter_names)
+                        return f"Active LoRA stack: {', '.join(adapter_names)}"
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "This PEFT build cannot activate multiple LoRA "
+                            "adapters as a stack. Use MLX DiT or upgrade PEFT "
+                            "for add_weighted_adapter support."
+                        ) from exc
+                raise RuntimeError(
+                    "This PEFT build does not expose add_weighted_adapter for "
+                    "LoRA stacking. Use MLX DiT or upgrade PEFT."
+                )
+            add_weighted(
+                adapters=adapter_names,
+                weights=weights,
+                adapter_name=stack_name,
+                combination_type="linear",
+            )
+
+        if hasattr(decoder, "set_adapter"):
+            decoder.set_adapter(stack_name)
+        if hasattr(self._handler, "_active_loras"):
+            self._handler._active_loras[stack_name] = 1.0
+        if hasattr(self._handler, "_lora_active_adapter"):
+            self._handler._lora_active_adapter = stack_name
+        return f"Active LoRA stack: {stack_name}"
+
+    @staticmethod
+    def _torch_lora_stack_name(adapter_names: list[str], weights: list[float]) -> str:
+        digest = hashlib.sha1(
+            "|".join(
+                f"{name}:{weight:.6f}" for name, weight in zip(adapter_names, weights)
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        return f"anvil_stack_{digest}"
+
     def set_lora_enabled(self, enabled: bool) -> dict[str, Any]:
         """Toggle an already-loaded ACE-Step LoRA adapter on or off."""
+        if self._mlx_dit_active():
+            from anvil_audio.mlx_lora import set_mlx_lora_enabled
+
+            status = set_mlx_lora_enabled(self._handler.mlx_decoder, bool(enabled))
+            return {
+                "enabled": bool(enabled),
+                "message": "MLX LoRA enabled" if enabled else "MLX LoRA disabled",
+                "status": status,
+            }
+
         set_use_lora = getattr(self._handler, "set_use_lora", None)
         if not callable(set_use_lora):
             return {
@@ -780,6 +948,13 @@ class ACEStepPipeline(BasePipeline):
 
     def lora_status(self) -> dict[str, Any]:
         """Return the current ACE-Step LoRA status when available."""
+        if self._mlx_dit_active():
+            from anvil_audio.mlx_lora import get_mlx_lora_status
+
+            status = get_mlx_lora_status(self._handler.mlx_decoder)
+            if status.get("loaded"):
+                return status
+
         get_status = getattr(self._handler, "get_lora_status", None)
         if not callable(get_status):
             return {}
