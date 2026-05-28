@@ -122,6 +122,7 @@ Command and flag reference for Gradio, generation, datasets, cloud jobs, LoRA, a
 | `--recipe` | `lora-balanced` | Remote LoRA recipe preset |
 | `--max-hours` | `6` | Runtime budget written into `job.json` |
 | `--training-lyrics` | `[Instrumental]` | Lyrics marker passed to remote LoRA preprocessing |
+| `--training-lyrics-source` | `constant` | Use `transcript` to fill sample lyrics from per-clip transcripts |
 | `--host` | required | SSH host for `run-ssh`, e.g. `ubuntu@203.0.113.10` |
 | `--port` | `22` | SSH port |
 | `--identity-file` | default SSH config | Optional SSH private key |
@@ -152,6 +153,7 @@ Command and flag reference for Gradio, generation, datasets, cloud jobs, LoRA, a
 | `--model-variant` | `sft` | `turbo`, `base`, `sft`, or custom folder name |
 | `--precision` | `fp32` for preprocess | Preprocess/train precision |
 | `--custom-tag` | blank | Trigger tag prepended during preprocessing |
+| `--lyrics-source` | `constant` | Use `transcript` to prefer per-clip lyrics/transcript metadata |
 | `--output-dir` | required | Tensor or training output directory |
 | `--epochs` | `100` | Training epochs |
 | `--rank` / `--alpha` | `64` / `128` | LoRA rank and alpha |

@@ -153,6 +153,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     package.add_argument(
+        "--training-lyrics-source",
+        default="constant",
+        choices=("constant", "transcript"),
+        help=(
+            "How remote preprocessing populates sample lyrics. Default: constant. "
+            "Use transcript for vocal-stem jobs with reviewed per-clip transcripts."
+        ),
+    )
+    package.add_argument(
         "--repo-url",
         default=None,
         help="Git URL used by bootstrap.sh. Default: current origin or Anvil repo.",
@@ -361,6 +370,7 @@ def main() -> None:
                     max_hours=args.max_hours,
                     checkpoint_dir=args.checkpoint_dir,
                     training_lyrics=args.training_lyrics,
+                    training_lyrics_source=args.training_lyrics_source,
                     repo_url=args.repo_url,
                     repo_ref=args.repo_ref,
                     force=args.force,

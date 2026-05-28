@@ -171,6 +171,7 @@ tmp/
 *.pt
 *.pth
 *.ckpt
+mlx_models/
 
 # Container
 *.sif

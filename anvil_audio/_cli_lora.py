@@ -211,6 +211,7 @@ def main() -> None:
                 output_path=Path(args.output) if args.output else None,
                 custom_tag=args.custom_tag,
                 lyrics=args.lyrics,
+                lyrics_source=args.lyrics_source,
                 genre=args.genre,
             )
             print(f"ACE-Step dataset JSON: {out}")
@@ -225,6 +226,7 @@ def main() -> None:
                 precision=args.precision,
                 custom_tag=args.custom_tag,
                 lyrics=args.lyrics,
+                lyrics_source=args.lyrics_source,
                 genre=args.genre,
             )
             print(f"Preprocessed: {result['processed']}/{result['total']}")
@@ -334,6 +336,16 @@ def _add_dataset_metadata_args(parser: argparse.ArgumentParser) -> None:
         "--lyrics",
         default="[Instrumental]",
         help="Default lyrics stored for every clip.",
+    )
+    parser.add_argument(
+        "--lyrics-source",
+        choices=("constant", "transcript"),
+        default="constant",
+        help=(
+            "How ACE-Step sample lyrics are populated. 'constant' uses --lyrics "
+            "for every clip; 'transcript' prefers per-clip lyrics/transcript "
+            "fields and falls back to --lyrics."
+        ),
     )
     parser.add_argument(
         "--genre",

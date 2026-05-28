@@ -116,6 +116,60 @@ def test_write_acestep_dataset_json_from_anvil_dataset(tmp_path):
     assert payload["samples"][0]["lyrics"] == "[Instrumental]"
 
 
+def test_write_acestep_dataset_json_can_use_per_clip_transcripts(tmp_path):
+    dataset = tmp_path / "dataset"
+    clips = dataset / "clips"
+    clips.mkdir(parents=True)
+    for name in ("clip_0001.wav", "clip_0002.wav", "clip_0003.wav"):
+        (clips / name).write_bytes(b"RIFF")
+    (dataset / "dataset_manifest.json").write_text(
+        json.dumps({"name": "voice_style"}),
+        encoding="utf-8",
+    )
+    (dataset / "captions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "file": "clips/clip_0001.wav",
+                    "caption": "smoky male vocal",
+                    "lyrics": "Manual reviewed lyric",
+                    "transcript": "Ignored transcript",
+                },
+                {
+                    "file": "clips/clip_0002.wav",
+                    "caption": "close vocal phrase",
+                    "transcript": "Transcript lyric",
+                },
+                {
+                    "file": "clips/clip_0003.wav",
+                    "caption": "voice tail",
+                    "transcription": {"text": "Whisper lyric"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = write_acestep_dataset_json(
+        dataset,
+        lyrics="fallback vocal marker",
+        lyrics_source="transcript",
+    )
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert payload["metadata"]["lyrics_source"] == "transcript"
+    assert [sample["lyrics"] for sample in payload["samples"]] == [
+        "Manual reviewed lyric",
+        "Transcript lyric",
+        "Whisper lyric",
+    ]
+    assert [sample["is_instrumental"] for sample in payload["samples"]] == [
+        False,
+        False,
+        False,
+    ]
+
+
 def test_write_acestep_dataset_json_uses_unique_sample_names(tmp_path):
     dataset = tmp_path / "dataset"
     (dataset / "stems/clip_0001").mkdir(parents=True)
@@ -143,12 +197,8 @@ def test_write_acestep_dataset_json_uses_unique_sample_names(tmp_path):
         "00001_instrumental.wav",
         "00002_instrumental.wav",
     ]
-    assert samples[0]["audio_path"].endswith(
-        ".acestep_audio/00001_instrumental.wav"
-    )
-    assert samples[1]["audio_path"].endswith(
-        ".acestep_audio/00002_instrumental.wav"
-    )
+    assert samples[0]["audio_path"].endswith(".acestep_audio/00001_instrumental.wav")
+    assert samples[1]["audio_path"].endswith(".acestep_audio/00002_instrumental.wav")
     assert Path(samples[0]["audio_path"]).is_file()
     assert Path(samples[1]["audio_path"]).is_file()
 
@@ -224,7 +274,9 @@ def test_adapter_output_is_finite_rejects_nan_weights(tmp_path):
 
     assert adapter_output_is_finite(tmp_path / "out") is True
 
-    save_file({"bad": torch.tensor([float("nan")])}, final / "adapter_model.safetensors")
+    save_file(
+        {"bad": torch.tensor([float("nan")])}, final / "adapter_model.safetensors"
+    )
 
     assert adapter_output_is_finite(tmp_path / "out") is False
 

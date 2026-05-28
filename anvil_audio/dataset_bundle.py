@@ -138,7 +138,7 @@ def _bundle_clip(
             strict=strict,
         )
 
-    return {
+    payload = {
         "id": f"clip_{index:04d}",
         "file": file_value,
         "caption": str(record.get("caption") or record.get("prompt") or ""),
@@ -150,6 +150,14 @@ def _bundle_clip(
         "seconds_total": _as_float(record.get("seconds_total"), default=0.0),
         "assets": assets,
     }
+    for field_name in ("lyrics", "transcript"):
+        value = str(record.get(field_name) or "").strip()
+        if value:
+            payload[field_name] = value
+    transcription = record.get("transcription")
+    if isinstance(transcription, dict) and transcription:
+        payload["transcription"] = transcription
+    return payload
 
 
 def _add_asset(

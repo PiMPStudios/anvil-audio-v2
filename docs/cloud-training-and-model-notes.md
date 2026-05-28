@@ -166,7 +166,10 @@ run train against full mixes, instrumental stems, or vocal stems without
 manually editing captions. Instrumental jobs can keep the default
 `--training-lyrics "[Instrumental]"`; vocal-stem jobs should pass a short
 non-instrumental marker such as
-`--training-lyrics "vocal stem, expressive vocal performance"`.
+`--training-lyrics "vocal stem, expressive vocal performance"`. If the source
+dataset includes reviewed transcripts, add `--training-lyrics-source transcript`
+so remote preprocessing uses per-clip lyrics text before falling back to the
+generic marker.
 
 Expected behavior:
 

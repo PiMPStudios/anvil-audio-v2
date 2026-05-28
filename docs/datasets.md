@@ -233,8 +233,8 @@ anvil dataset export-training-bundle ./datasets/my_style_YYYYMMDD_HHMMSS \
 ```
 
 This writes `training_bundle.json` with the selected assets, captions, tags,
-negative tags, timing, and warnings for missing optional assets. Use `--strict`
-when a missing requested asset should fail the export.
+negative tags, timing, transcript metadata, and warnings for missing optional
+assets. Use `--strict` when a missing requested asset should fail the export.
 
 ## Portable Cloud Jobs
 
@@ -255,7 +255,9 @@ The package copies the selected assets under `inputs/dataset`, rewrites
 writes remote scripts for bootstrap, training, and collection.
 
 For vocal-stem jobs, export a vocals bundle and pass a non-instrumental
-preprocess marker:
+preprocess marker. If the dataset was built with transcription and the
+transcripts have been reviewed, use `--training-lyrics-source transcript` so
+ACE-Step receives per-clip lyrics instead of one generic lyrics value:
 
 ```bash
 anvil dataset export-training-bundle ./datasets/my_style_YYYYMMDD_HHMMSS \
@@ -267,7 +269,8 @@ anvil cloud package ./datasets/my_style_YYYYMMDD_HHMMSS/training_bundle_vocals.j
     --primary-asset vocals \
     --model-variant xl_sft \
     --recipe lora-balanced \
-    --training-lyrics "vocal stem, expressive vocal performance"
+    --training-lyrics "vocal stem, expressive vocal performance" \
+    --training-lyrics-source transcript
 ```
 
 On managed CUDA images, the generated `bootstrap.sh` keeps the image's existing

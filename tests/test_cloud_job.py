@@ -52,6 +52,7 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert job["runtime"]["repo_ref"] == "feature-cloud"
     assert job["training"]["recipe"] == "lora-balanced"
     assert job["training"]["lyrics"] == "[Instrumental]"
+    assert job["training"]["lyrics_source"] == "constant"
     assert job["training"]["checkpoint_models"] == ["main", "acestep-v15-sft"]
 
     bootstrap = output_dir / "scripts/bootstrap.sh"
@@ -61,26 +62,28 @@ def test_create_cloud_job_package_copies_primary_assets(tmp_path):
     assert "venv --system-site-packages .venv" in bootstrap_text
     assert "download_main_model" in bootstrap_text
     assert "download_submodel" in bootstrap_text
-    assert 'REQUIRED_CHECKPOINT_MODELS=\'["main", "acestep-v15-sft"]\'' in bootstrap_text
+    assert (
+        'REQUIRED_CHECKPOINT_MODELS=\'["main", "acestep-v15-sft"]\'' in bootstrap_text
+    )
     assert 'pip install -c "$CONSTRAINTS_FILE" "$ANVIL_AUDIO_INSTALL"' in bootstrap_text
     assert "scikit-learn<1.8" in bootstrap_text
     assert "--force-reinstall" in bootstrap_text
     assert "--no-cache-dir" in bootstrap_text
-    assert 'pip install "$ACESTEP_INSTALL" -c "$CONSTRAINTS_FILE" --no-deps' in bootstrap_text
-
-    training_text = (output_dir / "scripts/run_training.sh").read_text(
-        encoding="utf-8"
+    assert (
+        'pip install "$ACESTEP_INSTALL" -c "$CONSTRAINTS_FILE" --no-deps'
+        in bootstrap_text
     )
+
+    training_text = (output_dir / "scripts/run_training.sh").read_text(encoding="utf-8")
     assert 'rm -rf "$TENSOR_DIR"' in training_text
     assert "--lyrics '[Instrumental]'" in training_text
+    assert "--lyrics-source constant" in training_text
 
-    collect_text = (output_dir / "scripts/collect.sh").read_text(
-        encoding="utf-8"
-    )
+    collect_text = (output_dir / "scripts/collect.sh").read_text(encoding="utf-8")
     assert "anvil_cloud_collect" in collect_text
     assert "outputs/lora/final" in collect_text
     assert "outputs/lora/checkpoints.txt" in collect_text
-    assert "tar -czf \"$ARCHIVE\" -C \"$COLLECT_DIR\" ." in collect_text
+    assert 'tar -czf "$ARCHIVE" -C "$COLLECT_DIR" .' in collect_text
     assert "tar -czf outputs/anvil_cloud_results.tar.gz job.json" not in collect_text
 
 
@@ -100,10 +103,43 @@ def test_create_cloud_job_package_accepts_custom_training_lyrics(tmp_path):
     job = json.loads((output_dir / "job.json").read_text(encoding="utf-8"))
     assert job["training"]["lyrics"] == "vocal stem, expressive male vocal"
 
-    training_text = (output_dir / "scripts/run_training.sh").read_text(
-        encoding="utf-8"
-    )
+    training_text = (output_dir / "scripts/run_training.sh").read_text(encoding="utf-8")
     assert "--lyrics 'vocal stem, expressive male vocal'" in training_text
+
+
+def test_create_cloud_job_package_preserves_transcripts_for_lyrics_source(tmp_path):
+    bundle = _write_training_bundle(tmp_path)
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    payload["clips"][0]["transcript"] = "I keep the light low"
+    payload["clips"][0]["transcription"] = {
+        "backend": "fake-whisper",
+        "text": "I keep the light low",
+    }
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    output_dir = tmp_path / "jobs" / "voice_job"
+
+    create_cloud_job_package(
+        CloudJobPackageConfig(
+            training_bundle=bundle,
+            output_dir=output_dir,
+            primary_asset="instrumental",
+            training_lyrics="fallback vocal marker",
+            training_lyrics_source="transcript",
+        )
+    )
+
+    captions = json.loads(
+        (output_dir / "inputs/dataset/captions.json").read_text(encoding="utf-8")
+    )
+    assert captions[0]["transcript"] == "I keep the light low"
+    assert captions[0]["transcription"]["backend"] == "fake-whisper"
+
+    job = json.loads((output_dir / "job.json").read_text(encoding="utf-8"))
+    assert job["training"]["lyrics"] == "fallback vocal marker"
+    assert job["training"]["lyrics_source"] == "transcript"
+
+    training_text = (output_dir / "scripts/run_training.sh").read_text(encoding="utf-8")
+    assert "--lyrics-source transcript" in training_text
 
 
 def test_create_cloud_job_package_fails_without_primary_assets(tmp_path):

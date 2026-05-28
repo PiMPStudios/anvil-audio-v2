@@ -16,13 +16,14 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 ACESTEP_TRAINING_VARIANT_DIRS = {
     "xl_turbo": "acestep-v15-xl-turbo",
     "xl_base": "acestep-v15-xl-base",
     "xl_sft": "acestep-v15-xl-sft",
 }
+LyricsSource = Literal["constant", "transcript"]
 
 
 @dataclass(slots=True)
@@ -67,6 +68,7 @@ def write_acestep_dataset_json(
     output_path: Path | None = None,
     custom_tag: str = "",
     lyrics: str = "[Instrumental]",
+    lyrics_source: LyricsSource = "constant",
     genre: str = "",
 ) -> Path:
     """Write an ACE-Step training_v2 dataset JSON for an Anvil dataset.
@@ -78,6 +80,9 @@ def write_acestep_dataset_json(
         custom_tag: Optional trigger tag inserted into ACE-Step prompts.
         lyrics: Default lyrics for each clip. Use ``"[Instrumental]"`` for
             instrumental style LoRAs.
+        lyrics_source: ``"constant"`` to use *lyrics* for every sample, or
+            ``"transcript"`` to prefer per-record lyrics/transcript text and
+            fall back to *lyrics* when a record has no transcript.
         genre: Optional genre fallback for every clip.
 
     Returns:
@@ -105,14 +110,19 @@ def write_acestep_dataset_json(
             continue
         audio_path = (dataset_dir / rel_file).resolve()
         caption = str(record.get("caption") or record.get("prompt") or audio_path.stem)
-        analysis = record.get("analysis") if isinstance(record.get("analysis"), dict) else {}
+        analysis = (
+            record.get("analysis") if isinstance(record.get("analysis"), dict) else {}
+        )
         duration = float(
-            record.get("seconds_total")
-            or analysis.get("duration_seconds")
-            or 0.0
+            record.get("seconds_total") or analysis.get("duration_seconds") or 0.0
         )
         sample_genre = genre or ", ".join(record.get("tags", [])[:5])
         sample_filename = _sample_filename(index, rel_file)
+        sample_lyrics = _lyrics_for_record(
+            record,
+            default_lyrics=lyrics,
+            lyrics_source=lyrics_source,
+        )
         staged_audio_path = _stage_sample_audio(
             dataset_dir,
             source_audio=audio_path,
@@ -123,13 +133,13 @@ def write_acestep_dataset_json(
                 "filename": sample_filename,
                 "audio_path": str(staged_audio_path),
                 "caption": caption,
-                "lyrics": lyrics,
+                "lyrics": sample_lyrics,
                 "genre": sample_genre,
                 "duration": duration,
                 "bpm": analysis.get("tempo_bpm_estimate"),
                 "keyscale": "",
                 "timesignature": "",
-                "is_instrumental": _is_instrumental(caption, lyrics),
+                "is_instrumental": _is_instrumental(caption, sample_lyrics),
                 "custom_tag": custom_tag,
                 "prompt_override": "caption",
                 "source_index": index,
@@ -147,6 +157,7 @@ def write_acestep_dataset_json(
             "tag_position": "prepend" if custom_tag else "append",
             "genre_ratio": 0,
             "custom_tag": custom_tag,
+            "lyrics_source": lyrics_source,
             "generated_by": "anvil-audio",
         },
         "samples": samples,
@@ -166,6 +177,7 @@ def preprocess_for_acestep(
     precision: str = "fp32",
     custom_tag: str = "",
     lyrics: str = "[Instrumental]",
+    lyrics_source: LyricsSource = "constant",
     genre: str = "",
 ) -> dict[str, Any]:
     """Run ACE-Step training_v2 preprocessing for an Anvil dataset."""
@@ -173,6 +185,7 @@ def preprocess_for_acestep(
         dataset_dir,
         custom_tag=custom_tag,
         lyrics=lyrics,
+        lyrics_source=lyrics_source,
         genre=genre,
     )
     checkpoint_root = checkpoint_dir or default_checkpoint_dir()
@@ -300,12 +313,9 @@ def run_lora_training(config: LoRATrainConfig) -> int:
 def adapter_output_exists(output_dir: Path) -> bool:
     """Return true when ACE-Step wrote an inference-ready adapter."""
     final_dir = output_dir.expanduser().resolve() / "final"
-    peft = (
-        (final_dir / "adapter_config.json").is_file()
-        and (
-            (final_dir / "adapter_model.safetensors").is_file()
-            or (final_dir / "adapter_model.bin").is_file()
-        )
+    peft = (final_dir / "adapter_config.json").is_file() and (
+        (final_dir / "adapter_model.safetensors").is_file()
+        or (final_dir / "adapter_model.bin").is_file()
     )
     lokr = (final_dir / "lokr_weights.safetensors").is_file()
     return peft or lokr
@@ -378,6 +388,38 @@ def _training_safe_root(config: LoRATrainConfig) -> Path:
         common = tensor_parent
     common.mkdir(parents=True, exist_ok=True)
     return common
+
+
+def _lyrics_for_record(
+    record: dict[str, Any],
+    *,
+    default_lyrics: str,
+    lyrics_source: LyricsSource,
+) -> str:
+    if lyrics_source == "constant":
+        return default_lyrics
+    if lyrics_source != "transcript":
+        raise ValueError(
+            f"Unsupported lyrics source: {lyrics_source}. "
+            "Expected 'constant' or 'transcript'."
+        )
+    return (
+        _record_text_field(record, "lyrics")
+        or _record_text_field(record, "transcript")
+        or _transcription_text(record)
+        or default_lyrics
+    )
+
+
+def _record_text_field(record: dict[str, Any], name: str) -> str:
+    return str(record.get(name) or "").strip()
+
+
+def _transcription_text(record: dict[str, Any]) -> str:
+    transcription = record.get("transcription")
+    if not isinstance(transcription, dict):
+        return ""
+    return str(transcription.get("text") or "").strip()
 
 
 def _is_instrumental(caption: str, lyrics: str) -> bool:

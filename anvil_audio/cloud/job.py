@@ -134,6 +134,7 @@ class CloudJobPackageConfig:
     max_hours: float = 6.0
     checkpoint_dir: str = "~/.cache/anvil-audio/acestep/checkpoints"
     training_lyrics: str = "[Instrumental]"
+    training_lyrics_source: str = "constant"
     repo_url: str | None = None
     repo_ref: str | None = None
     force: bool = False
@@ -274,7 +275,7 @@ def _caption_record_from_bundle_clip(
     index: int, clip: dict[str, Any], asset_rel: str
 ) -> dict[str, Any]:
     caption = str(clip.get("caption") or clip.get("prompt") or f"clip {index}")
-    return {
+    record = {
         "file": asset_rel,
         "source_file": str(clip.get("file") or ""),
         "caption": caption,
@@ -286,6 +287,14 @@ def _caption_record_from_bundle_clip(
         "seconds_total": _as_float(clip.get("seconds_total"), default=0.0),
         "cloud_job_source_id": str(clip.get("id") or f"clip_{index:04d}"),
     }
+    for field_name in ("lyrics", "transcript"):
+        value = str(clip.get(field_name) or "").strip()
+        if value:
+            record[field_name] = value
+    transcription = clip.get("transcription")
+    if isinstance(transcription, dict) and transcription:
+        record["transcription"] = transcription
+    return record
 
 
 def _copy_optional_metadata(source_dataset_dir: Path, job_dataset_dir: Path) -> None:
@@ -347,6 +356,7 @@ def _job_payload(
             ),
             "device": "cuda",
             "lyrics": config.training_lyrics,
+            "lyrics_source": config.training_lyrics_source,
             "genre": str(bundle.get("dataset_name") or ""),
             "recipe_args": {
                 "epochs": recipe.epochs,
@@ -520,6 +530,7 @@ def _run_training_script(job: dict[str, Any]) -> str:
     recipe = training["recipe_args"]
     checkpoint_dir = str(training["checkpoint_dir"])
     lyrics = shlex.quote(str(training.get("lyrics") or ""))
+    lyrics_source = shlex.quote(str(training.get("lyrics_source") or "constant"))
     genre = shlex.quote(str(training["genre"]))
     target_modules = " ".join(str(item) for item in recipe["target_modules"])
     return f"""#!/usr/bin/env bash
@@ -549,6 +560,7 @@ anvil lora preprocess "$DATASET_DIR" \\
   --device cuda \\
   --precision {recipe["preprocess_precision"]} \\
   --lyrics {lyrics} \\
+  --lyrics-source {lyrics_source} \\
   --genre {genre} 2>&1 | tee logs/preprocess.log
 
 if command -v timeout >/dev/null 2>&1; then

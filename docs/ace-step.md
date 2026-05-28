@@ -399,7 +399,10 @@ later without changing the job format.
 
 When packaging vocal-stem LoRA jobs, use `--primary-asset vocals` and set
 `--training-lyrics` to a short vocal marker instead of leaving the default
-`[Instrumental]` marker in place.
+`[Instrumental]` marker in place. For transcribed datasets, add
+`--training-lyrics-source transcript` after reviewing the transcript text so
+the remote preprocessing step writes per-clip lyrics into ACE-Step's dataset
+JSON.
 
 `anvil cloud search` uses GPUFindr's read-only public GPU catalog to show live
 provider availability and pricing before you create an account somewhere.

@@ -31,6 +31,8 @@ def test_export_training_bundle_includes_full_mix_and_stems(tmp_path):
         "instrumental": "stems/clip_0001/instrumental.wav",
         "vocals": "stems/clip_0001/vocals.wav",
     }
+    assert bundle["clips"][0]["transcript"] == "I keep the light low"
+    assert bundle["clips"][0]["transcription"]["backend"] == "fake-whisper"
 
 
 def test_export_training_bundle_warns_for_missing_optional_assets(tmp_path):
@@ -87,6 +89,11 @@ def _write_bundle_dataset(tmp_path):
             "confidence": 0.8,
             "seconds_start": 0.0,
             "seconds_total": 10.0,
+            "transcript": "I keep the light low",
+            "transcription": {
+                "backend": "fake-whisper",
+                "text": "I keep the light low",
+            },
             "separation": {
                 "stems": {
                     "instrumental": "stems/clip_0001/instrumental.wav",
