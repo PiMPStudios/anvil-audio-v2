@@ -308,7 +308,9 @@ def build_mask(sample_size, mask_args):
     softnessR = round(mask_args["softnessR"] / 100.0 * sample_size)
     marination = mask_args["marination"]
 
-    # use hann windows for softening the transition (i don't know if this is correct)
+    # Hann ramps control when each location unlocks during the denoising schedule.
+    # The sampler currently thresholds this into a per-step binary mask rather than
+    # doing a continuous crossfade.
     hannL = torch.hann_window(softnessL * 2, periodic=False)[:softnessL]
     hannR = torch.hann_window(softnessR * 2, periodic=False)[softnessR:]
 

@@ -348,15 +348,12 @@ def validate_preprocessed_tensors(tensor_dir: Path) -> None:
     bad: dict[str, list[str]] = {}
     for path in sorted(tensor_dir.glob("*.pt")):
         payload = torch.load(path, map_location="cpu")
-        if not isinstance(payload, dict):
-            continue
-        for key, value in payload.items():
-            if (
-                torch.is_tensor(value)
-                and torch.is_floating_point(value)
-                and not bool(torch.isfinite(value).all())
-            ):
-                bad.setdefault(path.name, []).append(key)
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if not _all_tensors_finite(value):
+                    bad.setdefault(path.name, []).append(str(key))
+        elif not _all_tensors_finite(payload):
+            bad.setdefault(path.name, []).append("<root>")
     if bad:
         preview = "; ".join(
             f"{name}: {', '.join(keys)}" for name, keys in list(bad.items())[:5]

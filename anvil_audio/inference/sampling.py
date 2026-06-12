@@ -1,5 +1,7 @@
 
+import contextlib
 import math
+import time
 
 import torch
 import k_diffusion as K
@@ -61,6 +63,7 @@ def sample_discrete_euler(model, x, steps, sigma_max=1, verbose: bool = True, **
 def sample(model, x, steps, eta, verbose: bool = True, **extra_args):
     """Draws samples from a model given starting noise. v-diffusion"""
     ts = x.new_ones([x.shape[0]])
+    device_type = x.device.type
 
     # Create the noise schedule
     t = torch.linspace(1, 0, steps + 1)[:-1]
@@ -68,15 +71,24 @@ def sample(model, x, steps, eta, verbose: bool = True, **extra_args):
 
     if verbose:
         itv = 10
-        t_s = torch.cuda.Event(enable_timing=True)
-        t_e = torch.cuda.Event(enable_timing=True)
-        t_s.record()
+        use_cuda_timing = device_type == "cuda"
+        if use_cuda_timing:
+            t_s = torch.cuda.Event(enable_timing=True)
+            t_e = torch.cuda.Event(enable_timing=True)
+            t_s.record()
+        else:
+            t_s = time.monotonic()
 
     # The sampling loop
     for i in range(steps):
 
         # Get the model output (v, the predicted velocity)
-        with torch.cuda.amp.autocast():
+        autocast_ctx = (
+            torch.amp.autocast(device_type="cuda")
+            if device_type == "cuda"
+            else contextlib.nullcontext()
+        )
+        with autocast_ctx:
             v = model(x, ts * t[i], **extra_args).float()
 
         # Predict the noise and the denoised image
@@ -101,11 +113,16 @@ def sample(model, x, steps, eta, verbose: bool = True, **extra_args):
                 x += torch.randn_like(x) * ddim_sigma
 
         if verbose and (i + 1) % itv == 0:
-            t_e.record()
-            torch.cuda.synchronize()
-            proc_time = t_s.elapsed_time(t_e) / 1000.
+            if use_cuda_timing:
+                t_e.record()
+                torch.cuda.synchronize()
+                proc_time = t_s.elapsed_time(t_e) / 1000.
+                t_s.record()
+            else:
+                now = time.monotonic()
+                proc_time = now - t_s
+                t_s = now
             print_once(f"{i + 1}\t / {steps}  [{itv / proc_time:.2f} iter/sec]")
-            t_s.record()
 
     # If we are on the last timestep, output the denoised image
     return pred

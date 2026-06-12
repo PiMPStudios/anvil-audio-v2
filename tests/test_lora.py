@@ -79,6 +79,24 @@ def test_resolve_lora_stack_accepts_primary_and_text_specs(monkeypatch, tmp_path
     assert [item.scale for item in stack] == [0.8, 0.25]
 
 
+def test_resolve_lora_stack_preserves_signed_and_large_weights(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANVIL_AUDIO_LORA_DIR", str(tmp_path / "lora-cache"))
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_fake_peft_adapter(first)
+    _write_fake_peft_adapter(second)
+    import_local_adapter(first, name="Lead Style")
+    import_local_adapter(second, name="Room Tone")
+
+    stack = resolve_lora_stack(
+        "lead-style",
+        primary_scale=1.4,
+        stack="room-tone:-0.3",
+    )
+
+    assert [item.scale for item in stack] == [1.4, -0.3]
+
+
 def test_write_acestep_dataset_json_from_anvil_dataset(tmp_path):
     dataset = tmp_path / "dataset"
     clips = dataset / "clips"
@@ -295,4 +313,20 @@ def test_validate_preprocessed_tensors_rejects_nonfinite_values(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="non-finite tensors"):
+        validate_preprocessed_tensors(tmp_path)
+
+
+def test_validate_preprocessed_tensors_rejects_nested_nonfinite_values(tmp_path):
+    import pytest
+    import torch
+
+    torch.save(
+        {
+            "encoder_hidden_states": torch.ones(1),
+            "nested": {"bad": torch.tensor([float("nan")])},
+        },
+        tmp_path / "bad.pt",
+    )
+
+    with pytest.raises(RuntimeError, match="nested"):
         validate_preprocessed_tensors(tmp_path)

@@ -461,7 +461,7 @@ def _normalise_lora_scale(value: Any) -> float:
         raise ValueError(f"Invalid LoRA scale: {value!r}") from exc
     if not math.isfinite(scale):
         raise ValueError(f"Invalid LoRA scale: {value!r}")
-    return max(0.0, min(1.0, scale))
+    return scale
 
 
 def _unique_runtime_adapter_name(base_name: str, used_names: set[str]) -> str:
